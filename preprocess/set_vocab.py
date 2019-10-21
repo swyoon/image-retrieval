@@ -5,12 +5,12 @@ import time
 import numpy as np
 import h5py
 
-vocab2idx = {"<PAD>":0, "<UNK>":1, "<START>":2, "<END>":3}
+vocab2idx = {"<UNK>":0}
 vocab_objects = []
 vocab_relations = []
 vocab_attributes = []
 
-idx2vocab = ["<PAD>",  "<UNK>", "<START>", "<END>"]
+idx2vocab = ["<UNK>"]
 init_len = len(idx2vocab)
 vocab_len = init_len
 not_in = 0
@@ -74,13 +74,18 @@ glove_embs = np.zeros([vocab_len, 300])
 for idx, strs in enumerate(idx2vocab[init_len:]):
     tokens = strs.strip().split(' ')
     if len(tokens) > 1:
-        glove_for_edge = []
+        glove_for_phrase = []
         for token in tokens:
             if token in glove:
-                glove_for_edge.append(glove[token])
+                glove_for_phrase.append(glove[token])
 
-        glove_for_edge = np.vstack(glove_for_edge)
-        glove_embs[idx+init_len] = np.mean(glove_for_edge, axis=0, keepdims=True)
+        if len(glove_for_phrase) > 0:
+            glove_for_phrase = np.vstack(glove_for_phrase)
+            glove_embs[idx + init_len] = np.mean(glove_for_phrase, axis=0, keepdims=True)
+
+        else:
+            print("no glove token for {}".format(tokens))
+
 
     else:
         if strs in glove:
