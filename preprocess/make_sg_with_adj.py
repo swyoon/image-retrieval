@@ -8,11 +8,18 @@ fname_sg = '/data/public/rw/datasets/visual_genome/filtered_scene_graphs_coco.js
 sgs = load_files(fname_sg)
 print("all sg data is loaded, {}s".format(time.time()-tic))
 
-new_sgs = {}
+fname_split_info = "/data/project/rw/CBIR/img_split.json"
+split_info = load_files(fname_split_info)
+
+new_sgs_train = {}
+new_sgs_test = {}
 
 for i, sg in enumerate(sgs):
     new_sg = {}
-    vg_image_id = sg['image_id']
+    vg_image_id = str(sg['image_id'])
+
+    if vg_image_id not in split_info.keys():
+        continue
 
     if i % 1000 == 0:
         print("{}/{}".format(i, len(sgs)))
@@ -64,7 +71,15 @@ for i, sg in enumerate(sgs):
     new_sg['node_labels'] = nodes
     new_sg['adj'] = adj
 
-    new_sgs[vg_image_id] = new_sg
+    if split_info[vg_image_id] == 'train':
+        new_sgs_train[vg_image_id] = new_sg
+    elif split_info[vg_image_id] == 'test':
+        new_sgs_test[vg_image_id] = new_sg
 
-fname_new_sg = '/data/public/rw/datasets/visual_genome/filtered_scene_graphs_with_adj.pkl'
-save_pickle(new_sgs, fname_new_sg)
+print("number of train sg: {}".format(len(new_sgs_train)))
+print("number of test sg: {}".format(len(new_sgs_test)))
+
+fname_new_sg_train = '/data/project/rw/CBIR/scene_graph_with_adj_train.pkl'
+fname_new_sg_test = '/data/project/rw/CBIR/scene_graph_with_adj_test.pkl'
+save_pickle(new_sgs_train, fname_new_sg_train)
+save_pickle(new_sgs_test, fname_new_sg_test)
