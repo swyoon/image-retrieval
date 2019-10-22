@@ -1,9 +1,8 @@
 import sys
 sys.path.append("..")
-from utils import load_files, save_pickle, clean_str
+from preprocess.utils import load_files, save_pickle, clean_str
 import time
 import numpy as np
-import h5py
 
 vocab2idx = {"<UNK>":0}
 vocab_objects = []
