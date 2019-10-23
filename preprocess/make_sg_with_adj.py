@@ -13,6 +13,7 @@ split_info = load_files(fname_split_info)
 
 new_sgs_train = {}
 new_sgs_test = {}
+num_sg_with_no_graph = 0
 
 for i, sg in enumerate(sgs):
     new_sg = {}
@@ -38,6 +39,11 @@ for i, sg in enumerate(sgs):
             num_nodes += len(obj['attributes'])
 
     num_nodes += len(relations)
+    if num_nodes == 0:
+        print("there is no nodes, img_id: {}".format(vg_image_id))
+        num_sg_with_no_graph += 1
+        continue
+
     adj = np.zeros([num_nodes, num_nodes], dtype=np.uint8)
 
     for obj in objects:

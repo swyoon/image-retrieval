@@ -11,9 +11,15 @@ split_info = load_files(fname_split_info)
 train_id = []
 test_id = []
 not_in_stanford_filtered = []
+no_sg = []
 new_split = {}
+
 for img_id in img_id_list:
     if str(img_id) in split_info.keys():
+        if len(sg[img_id]['node_labels']) == 0:
+            no_sg.append(img_id)
+            continue
+
         split = split_info[str(img_id)]
         if split == 'train':
             train_id.append(img_id)
@@ -33,10 +39,11 @@ num_total = len(img_id_list)
 num_not = len(not_in_stanford_filtered)
 num_train = len(train_id)
 num_test = len(test_id)
-
+num_no_sg = len(no_sg)
 print("train: {}/{}, {}".format(num_train, num_total, num_train/num_total))
 print("test: {}/{}, {}".format(num_test, num_total, num_test/num_total))
 print("not in stanford filted: {}".format(num_not))
+print("no sg: {}".format(num_no_sg))
 
 fname_new_split = "/data/project/rw/CBIR/img_split.json"
 save_json(new_split, fname_new_split)

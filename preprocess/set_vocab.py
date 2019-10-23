@@ -94,7 +94,7 @@ for idx, strs in enumerate(idx2vocab[init_len:]):
             not_in += 1
 print("not in words", not_in)
 
-project_pwd = '/data/project/rw/VisualGenome/CBIR/'
+project_pwd = '/data/project/rw/CBIR/'
 save_pickle(glove_embs, project_pwd+'glove_embs_vg_coco_sg.pkl')
 save_pickle(vocab2idx, project_pwd+'vocab2idx_vg_coco_sg.pkl')
 save_pickle(idx2vocab, project_pwd+'idx2vocab_vg_coco_sg.pkl')
