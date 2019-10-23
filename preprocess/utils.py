@@ -2,6 +2,7 @@ import pickle
 import json
 import yaml
 import h5py
+import numpy as np
 
 def load_files(path):
     if path.rsplit('.', 2)[-1] == 'json':
@@ -18,6 +19,9 @@ def load_files(path):
                 print(exc)
     elif path.rsplit('.', 2)[-1] == 'hdf5':
         data = h5py.File(path, "r")
+    elif path.rsplit('.', 2)[-1] == 'npz':
+        data = np.load(path)
+
     return data
 
 def save_pickle(data, path):
