@@ -6,10 +6,10 @@ DATASET:
   VOCAB_GLOVE: "/data/project/rw/CBIR/glove_embs_vg_coco_sg.pkl"
   VOCAB2IDX: "/data/project/rw/CBIR/vocab2idx_vg_coco_sg.pkl"
   IDX2VOCAB: "/data/project/rw/CBIR/idx2vocab_vg_coco_sg.pkl"
-  SIM_GT: "/data/public/rw/datasets/visual_genome/BERT_feature/SBERT_sims.hdf5"
+  SIM_GT: "/data/public/rw/datasets/visual_genome/BERT_feature/bert_sim.npz"
 
 MODEL:
-  BATCH_SIZE: 4
+  BATCH_SIZE: 128
   LR: 0.0001
   NUM_MAX_HE: 100
   STEP: 3

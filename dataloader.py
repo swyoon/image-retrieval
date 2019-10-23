@@ -41,7 +41,7 @@ def he_sampling(adj, word_vec, num_steps, max_num_he, eps_prob=0.001, word_emb_s
     return he_emb
 
 class Dset_VG(Dataset):
-    def __init__(self, cfg, sg, label, vocab_glove, vocab2idx, mode):
+    def __init__(self, cfg, sg, label, label_ids, vocab_glove, vocab2idx, mode):
         self.max_num_he = cfg['MODEL']['NUM_MAX_HE']
         self.word_emb_size = cfg['MODEL']['WORD_EMB_SIZE']
         self.sampling_steps = cfg['MODEL']['STEP']
@@ -49,7 +49,7 @@ class Dset_VG(Dataset):
         self.sg = sg
         self.sg_keys = list(self.sg.keys())
         self.label = label
-        self.label_id2idx = {str(val): i for i, val in enumerate(self.label['id'][:])}
+        self.label_id2idx = {str(val): i for i, val in enumerate(label_ids)}
         self.max_len_q = 20
 
         self.vocab_glove = vocab_glove
@@ -92,8 +92,9 @@ class Dset_VG(Dataset):
         return np.vstack(word_vec)
 
     def get_sim(self, given, compare):
+        idx_given = self.label_id2idx[given]
         idx_compare = self.label_id2idx[compare]
-        sim = self.label["/sims/{}".format(given)][idx_compare]
+        sim = self.label[idx_given][idx_compare]
 
         return sim
 
