@@ -77,7 +77,7 @@ def main():
     print("loading test data")
     sg_test = load_files(model_cfg['DATASET']['SG_TEST'])
     print("loaded test data {}s".format(time.time() - tic))
-    vg_id_infer = list(sg_test.keys())[:args.inference]
+    vg_id_infer = list(sg_test.keys())[:args.instance]
 
     vocab_glove = load_files(model_cfg['DATASET']['VOCAB_GLOVE'])
     vocab2idx = load_files(model_cfg['DATASET']['VOCAB2IDX'])
@@ -94,7 +94,7 @@ def main():
     train_dloader = DataLoader(train_dset, batch_size=model_cfg['MODEL']['BATCH_SIZE'], num_workers=args.num_workers, shuffle=True)
 
     infer_dset = Dset_VG_inference(model_cfg, sg_train, label_similarity, label_vg_ids, vocab_glove, vocab2idx)
-    infer_dloader = DataLoader(infer_dset, batch_size=model_cfg['MODEL']['BATCH_SIZE'], num_workers=1, shuffle=False)
+    infer_dloader = DataLoader(infer_dset, batch_size=model_cfg['MODEL']['BATCH_SIZE'], num_workers=args.num_workers, shuffle=False)
 
     # ------------ Model -----------------------
     model = HGAN(model_cfg)
