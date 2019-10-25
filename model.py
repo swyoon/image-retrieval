@@ -14,7 +14,7 @@ class TripletLoss(nn.Module):
         self.margin = margin
 
     def forward(self, score_pos, score_neg, size_average=True):
-        losses = F.relu(score_pos - score_neg + self.margin)
+        losses = F.relu(score_neg - score_pos + self.margin)
         return losses.mean() if size_average else losses.sum()
 
 class HGAN(nn.Module):
@@ -74,6 +74,7 @@ class HGAN(nn.Module):
                 out = torch.cat((out, att_out_sq), dim=1)  # [B, d*h]
 
         score = self.fc_score(out)
+        #score = F.relu(score)
         return score
 
     def forward(self, he_anchor, he_pos, he_neg):
