@@ -100,8 +100,8 @@ def main():
 
     # ------------ Construct Dataset Class ------------------------------------
     if model_cfg['MODEL']['TARGET'] == 'SBERT':
-        train_dset = Dset_VG_Pairwise(model_cfg, sg_train, label_similarity, label_vg_ids, vocab_glove, vocab2idx)
-        test_dset = Dset_VG_Pairwise(model_cfg, sg_test, label_similarity, label_vg_ids, vocab_glove, vocab2idx)
+        train_dset = Dset_VG_Pairwise(model_cfg, sg_train, sg_test, label_similarity, label_vg_ids, vocab_glove, vocab2idx, 'train')
+        test_dset = Dset_VG_Pairwise(model_cfg, sg_train, sg_test, label_similarity, label_vg_ids, vocab_glove, vocab2idx, 'test')
         test_dloader = DataLoader(test_dset, batch_size=model_cfg['MODEL']['BATCH_SIZE'], num_workers=args.num_workers, shuffle=False)
     else:
         train_dset = Dset_VG(model_cfg, sg_train, label_similarity, label_vg_ids, vocab_glove, vocab2idx)

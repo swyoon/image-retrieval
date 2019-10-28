@@ -57,7 +57,7 @@ def get_sim(vg_id_given, vg_id_compare,label, label_id2idx):
 
 
 class Dset_VG_Pairwise(Dataset):
-    def __init__(self, cfg, sg, label, label_ids, vocab_glove, vocab2idx):
+    def __init__(self, cfg, sg, test_sg, label, label_ids, vocab_glove, vocab2idx, mode):
         self.cfg = cfg
         self.max_num_he = cfg['MODEL']['NUM_MAX_HE']
         self.word_emb_size = cfg['MODEL']['WORD_EMB_SIZE']
@@ -65,18 +65,28 @@ class Dset_VG_Pairwise(Dataset):
 
         self.sg = sg
         self.sg_keys = list(self.sg.keys())
+        if mode == 'test':
+            self.test_sg = test_sg
+            self.test_sg_keys = list(self.test_sg.keys())
         self.label = label
         self.label_id2idx = {str(val): i for i, val in enumerate(label_ids)}
 
         self.vocab_glove = vocab_glove
         self.vocab2idx = vocab2idx
+        self.mode = mode
 
     def __len__(self):
+        if self.mode == 'test':
+            return len(self.test_sg)
         return len(self.sg)
 
     def __getitem__(self, idx):
-        vg_img_id = self.sg_keys[idx]
-        sg_anchor = self.sg[vg_img_id]
+        if self.mode == 'train':
+            vg_img_id = self.sg_keys[idx]
+            sg_anchor = self.sg[vg_img_id]
+        elif self.mode == 'test':
+            vg_img_id = self.test_sg_keys[idx]
+            sg_anchor = self.test_sg[vg_img_id]
 
         compare_img = np.random.randint(len(self.sg), size=1)
         compare_img_id = self.sg_keys[compare_img[0]]
