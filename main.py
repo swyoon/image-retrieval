@@ -3,7 +3,7 @@ import torch
 import os
 import torch.optim as optim
 from preprocess.utils import load_files, save_json
-from dataloader import Dset_VG, Dset_VG_inference, get_word_vec, get_sim, he_sampling
+from dataloader import Dset_VG, Dset_VG_inference, Dset_VG_Pairwise, get_word_vec, get_sim, he_sampling
 from torch.utils.data import DataLoader
 from model import HGAN
 import time
@@ -23,6 +23,15 @@ def prop_mini_batch_infer(mini_batch_compare, anchor, model):
     return score
 
 
+def prop_mini_batch_sbert(mini_batch, model):
+    HE_a, HE_p, sbert_score = mini_batch
+    HE_a = HE_a.cuda()
+    HE_p = HE_p.cuda()
+
+    score_p, score_n, loss = model(HE_a, HE_p, HE_p)
+
+    return score_p, sbert_score, loss
+
 def prop_mini_batch(mini_batch, model):
     HE_a, HE_p, HE_n = mini_batch
     HE_a = HE_a.cuda()
@@ -38,8 +47,8 @@ def main():
     ''' parse config file '''
     parser = argparse.ArgumentParser(description="Hypergraph Attention Networks for CBIR on VG dataset")
     parser.add_argument("--config_file", default="configs/han_baseline.yaml")
-    parser.add_argument("--exp_name", default="han_baseline")
-    parser.add_argument("--local_rank", type=int, default=0)
+    parser.add_argument("--exp_name", default="han_sbert_regression")
+    parser.add_argument("--trg_opt", type=str, default='SBERT')
     parser.add_argument("--resume", type=int, default=0)
     parser.add_argument("--inference", action='store_true')
     parser.add_argument("--instance", type=int, default=30)
@@ -90,7 +99,13 @@ def main():
     print("loaded label data {}s".format(time.time()-tic))
 
     # ------------ Construct Dataset Class ------------------------------------
-    train_dset = Dset_VG(model_cfg, sg_train, label_similarity, label_vg_ids, vocab_glove, vocab2idx)
+    if model_cfg['MODEL']['TARGET'] == 'SBERT':
+        train_dset = Dset_VG_Pairwise(model_cfg, sg_train, label_similarity, label_vg_ids, vocab_glove, vocab2idx)
+        test_dset = Dset_VG_Pairwise(model_cfg, sg_test, label_similarity, label_vg_ids, vocab_glove, vocab2idx)
+        test_dloader = DataLoader(test_dset, batch_size=model_cfg['MODEL']['BATCH_SIZE'], num_workers=args.num_workers, shuffle=False)
+    else:
+        train_dset = Dset_VG(model_cfg, sg_train, label_similarity, label_vg_ids, vocab_glove, vocab2idx)
+
     train_dloader = DataLoader(train_dset, batch_size=model_cfg['MODEL']['BATCH_SIZE'], num_workers=args.num_workers, shuffle=True)
 
     infer_dset = Dset_VG_inference(model_cfg, sg_train, label_similarity, label_vg_ids, vocab_glove, vocab2idx)
@@ -108,14 +123,18 @@ def main():
     # ------------ Iteration -----------------------
     train_loss = []
     num_iter = 0
-
+    test_loss = []
     for idx_epoch in range(args.max_epoch):
         # ------------ Training -----------------------
         torch.set_grad_enabled(True)
         model.train()
 
         for b_idx, mini_batch in enumerate(tqdm(train_dloader)):
-            score_p, score_n, loss = prop_mini_batch(mini_batch, model)
+            if model_cfg['MODEL']['TARGET'] == 'SBERT':
+                score_p, sbert_score, loss = prop_mini_batch_sbert(mini_batch, model)
+            else:
+                score_p, score_n, loss = prop_mini_batch(mini_batch, model)
+
             train_loss.append(loss.item())
 
             optimizer.zero_grad()
@@ -136,11 +155,22 @@ def main():
                    os.path.join(ckpt_path, 'ckpt_%d.pth.tar' % (idx_epoch)))
         torch.save(model, os.path.join(ckpt_path, 'model.pth'))
 
+        torch.set_grad_enabled(False)
+        model.eval()
+
+        for b_idx, mini_batch in enumerate(tqdm(test_dloader)):
+            if model_cfg['MODEL']['TARGET'] == 'SBERT':
+                score_p, sbert_score, loss = prop_mini_batch_sbert(mini_batch, model)
+            else:
+                score_p, score_n, loss = prop_mini_batch(mini_batch, model)
+
+            test_loss.append(loss.item())
+            if args.debug == False:
+                summary.add_scalar('loss/test', loss.item(), num_iter)
+
+
         # ------------ Full Inference -----------------------
         if idx_epoch % 10 == 0:
-            torch.set_grad_enabled(False)
-            model.eval()
-
             infer_results = {}
             for idx_infer, vid in enumerate(vg_id_infer):
                 print("INFERENCE, epoch: {}, num_infer: {}".format(idx_epoch, idx_infer))

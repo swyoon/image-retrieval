@@ -79,7 +79,7 @@ class Dset_VG_Pairwise(Dataset):
         sg_anchor = self.sg[vg_img_id]
 
         compare_img = np.random.randint(len(self.sg), size=1)
-        compare_img_id = self.sg_keys[compare_img]
+        compare_img_id = self.sg_keys[compare_img[0]]
         sim_score = get_sim(vg_img_id, compare_img_id, self.label, self.label_id2idx)
         sg_compare = self.sg[compare_img_id]
 

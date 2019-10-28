@@ -33,7 +33,10 @@ class HGAN(nn.Module):
         self.fc_score = torch.nn.Linear(self.nhidden*self.nhead, 1)
 
         self.margin = cfg['MODEL']['LOSS_MARGIN']
-        self.loss = TripletLoss(self.margin)
+        if self.cfg['MODEL']['TARGET'] == 'SBERT':
+            self.loss = nn.MSELoss()
+        else:
+            self.loss = TripletLoss(self.margin)
 
     def score(self, he_anchor, he_compare):
         num_he_anchor = he_anchor.shape[1]

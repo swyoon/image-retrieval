@@ -6,7 +6,7 @@ def run_train():
     subprocess.call([
         'python', 'main.py', '--config_file', 'configs/han_baseline.yaml',
         '--inference',
-        #'--debug'
+        '--debug'
     ])
 
 if __name__ == "__main__":
