@@ -83,8 +83,15 @@ class HGAN(nn.Module):
     def forward(self, he_anchor, he_pos, he_neg):
         #he_*: B x 100 x dim_word_emb
 
-        score_p = self.score(he_anchor, he_pos)
-        score_n = self.score(he_anchor, he_neg)
+        if self.cfg['MODEL']['TARGET'] == 'SBERT':
+            score_bert = torch.reshape(he_neg, (-1, 1))
+            score_p = self.score(he_anchor, he_pos)
+            loss = self.loss(score_p, score_bert)
+            return score_p, loss
+        else:
+            score_p = self.score(he_anchor, he_pos)
+            score_n = self.score(he_anchor, he_neg)
 
-        loss = self.loss(score_p, score_n)
-        return score_p, score_n, loss
+            loss = self.loss(score_p, score_n)
+
+            return score_p, score_n, loss

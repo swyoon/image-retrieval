@@ -11,15 +11,23 @@ from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
 
 
-def prop_mini_batch_infer(mini_batch_compare, anchor, model):
-    mini_batch_compare = mini_batch_compare.cuda()
-    anchor = torch.from_numpy(anchor).cuda()
+def prop_mini_batch_infer(mini_batch_compare, vg_id_anchor, HE_anchor, label, label_id2idx, model):
+    HE_compare, vg_id_compare = mini_batch_compare
+    sim_score = [get_sim(vg_id_anchor, i, label, label_id2idx) for i in vg_id_compare]
 
-    num_batch = mini_batch_compare.shape[0]
-    anchor = anchor.unsqueeze(0)
-    batch_anchor = anchor.repeat([num_batch, 1, 1])
+    HE_compare = HE_compare.cuda()
+    HE_anchor = torch.from_numpy(HE_anchor).cuda()
+    sim_score = torch.reshape(torch.tensor(sim_score), (-1, 1)).cuda()
 
-    score, _, loss = model(batch_anchor, mini_batch_compare, mini_batch_compare)
+    num_batch = HE_compare.shape[0]
+    HE_anchor = HE_anchor.unsqueeze(0)
+    batch_anchor = HE_anchor.repeat([num_batch, 1, 1])
+
+    if model.cfg['MODEL']['TARGET'] == 'SBERT':
+
+        score, loss = model(batch_anchor, HE_compare, sim_score)
+    else:
+        score, _, loss = model(batch_anchor, HE_compare, HE_compare)
     return score
 
 
@@ -27,10 +35,11 @@ def prop_mini_batch_sbert(mini_batch, model):
     HE_a, HE_p, sbert_score = mini_batch
     HE_a = HE_a.cuda()
     HE_p = HE_p.cuda()
+    sbert_score = sbert_score.cuda()
 
-    score_p, score_n, loss = model(HE_a, HE_p, HE_p)
+    score_p, loss = model(HE_a, HE_p, sbert_score)
 
-    return score_p, sbert_score, loss
+    return score_p, loss
 
 def prop_mini_batch(mini_batch, model):
     HE_a, HE_p, HE_n = mini_batch
@@ -123,6 +132,7 @@ def main():
     # ------------ Iteration -----------------------
     train_loss = []
     num_iter = 0
+    num_iter_test = 0
     test_loss = []
     for idx_epoch in range(args.max_epoch):
         # ------------ Training -----------------------
@@ -131,7 +141,7 @@ def main():
 
         for b_idx, mini_batch in enumerate(tqdm(train_dloader)):
             if model_cfg['MODEL']['TARGET'] == 'SBERT':
-                score_p, sbert_score, loss = prop_mini_batch_sbert(mini_batch, model)
+                score_p, loss = prop_mini_batch_sbert(mini_batch, model)
             else:
                 score_p, score_n, loss = prop_mini_batch(mini_batch, model)
 
@@ -145,6 +155,7 @@ def main():
                 summary.add_scalar('loss/train', loss.item(), num_iter)
 
             num_iter += 1
+            break
 
         lr_scheduler.step()
 
@@ -160,14 +171,15 @@ def main():
 
         for b_idx, mini_batch in enumerate(tqdm(test_dloader)):
             if model_cfg['MODEL']['TARGET'] == 'SBERT':
-                score_p, sbert_score, loss = prop_mini_batch_sbert(mini_batch, model)
+                score_p, loss = prop_mini_batch_sbert(mini_batch, model)
             else:
                 score_p, score_n, loss = prop_mini_batch(mini_batch, model)
 
             test_loss.append(loss.item())
             if args.debug == False:
-                summary.add_scalar('loss/test', loss.item(), num_iter)
-
+                summary.add_scalar('loss/test', loss.item(), num_iter_test)
+            num_iter_test += 1
+            break
 
         # ------------ Full Inference -----------------------
         if idx_epoch % 10 == 0:
@@ -180,8 +192,8 @@ def main():
                 infer_result = {}
 
                 for b_idx, mini_batch in enumerate(tqdm(infer_dloader)):
-                    HE_compare, vg_id_compare = mini_batch
-                    score = prop_mini_batch_infer(HE_compare, HE_anchor, model)
+                    # HE_compare, vg_id_compare = mini_batch
+                    score = prop_mini_batch_infer(mini_batch, vid, HE_anchor, infer_dset.label, infer_dset.label_id2idx, model)
                     score_arr = [s.item() for s in score]
                     infer_result.update( list(zip(vg_id_compare, score_arr)) )
 
