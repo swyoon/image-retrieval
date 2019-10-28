@@ -2,7 +2,7 @@
 <html>
   <head>
     <meta charset="UTF-8">
-    <title>Ep-Woong-Win Viewer</title>
+    <title>CBIR Viewer</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='show.css') }}">
     <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css" integrity="sha384-ggOyR0iXCbMQv3Xipma34MD+dH/1fQ784/j6cY/iJTQUOhcWr7x9JvoRxT2MZw1T" crossorigin="anonymous">
     <script src="https://code.jquery.com/jquery-3.3.1.slim.min.js" integrity="sha384-q8i/X+965DzO0rT7abK41JStQIAqVgRVzpbzo5smXKp4YfRvH+8abtTE1Pi6jizo" crossorigin="anonymous"></script>
@@ -10,14 +10,21 @@
     <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/js/bootstrap.min.js" integrity="sha384-JjSmVgyd0p3pXB1rRibZUAYoIIy6OrQ6VrjIEaFf/nJGzIxFDsf4x0xIM+B07jRM" crossorigin="anonymous"></script>
   </head>
   <body>
-  <h2> Query method: {{ method }} </h2>
+  <h2> Query image: </h2>
+  <img src="{{ url_for('static', filename=query_img_path) }}" class="center">
+  <p style="text-align:center">{{ query_img_id }} </p>
+  <h2> Top {{ data | length }} similar images: </h2>
+  <div class="row">
+      {% for datum in data %}  <!-- (img_id, img_path, similarity_score)  -->
+        <div>
+        <img src="{{ url_for('static', filename=datum[1]) }}">
+        <p>{{ datum[0] }} <br>  <!-- img id -->
+           {{ datum[2] | round(3) }}  <!-- similarity score -->
+        </p>
 
-  <ul>
-  {% for imgid in imgids %}
-  <li><a href="{{ method }}/{{ imgid }}">{{ imgid }}</a></li>
-
-  {% endfor %}
-  </ul>
+        </div>
+      {% endfor %}
+  </div>
       
   </body>
 </html>

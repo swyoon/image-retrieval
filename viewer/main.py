@@ -14,14 +14,21 @@ def hello_world():
     return 'hello_world'
 
 
+@app.route('/show/', methods=['GET'])
+def show_method_list():
+    l_methods = sorted(os.listdir('results'))
+
+    return render_template('show_methods.html', l_methods=l_methods)
+
+
 @app.route('/show/<method>', methods=['GET'])
 def show_list(method):
     files = os.listdir(os.path.join('results', method))
-    print(files)
-    imgids = [f.split('.')[0] for f in files if f.lower().endswith('.tsv')]
-    print(imgids)
+    imgids = sorted([f.split('.')[0] for f in files if f.lower().endswith('.tsv')])
+    n_test_images = len(imgids)
 
-    return render_template('show_index.html', imgids=imgids, method=method)
+    return render_template('show_index.html', imgids=imgids, method=method,
+                           n_test_images=n_test_images)
 
 
 @app.route('/show/<method>/<query_img_id>', methods=['GET'])
