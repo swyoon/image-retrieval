@@ -14,6 +14,11 @@
   padding: 0 4px;
 }
 
+
+.row div {
+  width: 200px;
+}
+
 .row img {
   margin-top: 8px;
   vertical-align: middle;

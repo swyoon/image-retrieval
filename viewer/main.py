@@ -1,10 +1,16 @@
 import os
 from skimage.io import imread
 import pandas as pd
+import json
 from flask import Flask, render_template
 
 # global configuration
 visual_genome_img_dir = 'vg_images/'
+with open('/data/public/rw/datasets/visual_genome/vg_coco_caption.json', 'r') as f:
+    vg_coco = json.load(f)
+    print('caption loaded')
+    id2caption = {str(data['vg_id']):data['caption'] for data in vg_coco}
+
 
 app = Flask(__name__)
 
@@ -34,6 +40,8 @@ def show_list(method):
 @app.route('/show/<method>/<query_img_id>', methods=['GET'])
 def show(method, query_img_id):
     query_img_path = os.path.join(visual_genome_img_dir, f'{query_img_id}.jpg')
+    query_caption = id2caption[query_img_id]
+    query_caption = ' / '.join([cap.strip() for cap in query_caption])
 
     # read result file
     sim_score_file = os.path.join('results', method, f'{query_img_id}.tsv')
@@ -45,12 +53,14 @@ def show(method, query_img_id):
         img_id = str(int(row[0]))
         img_path = os.path.join(visual_genome_img_dir, f'{int(row[0])}.jpg')
         score = row[1]
-        data.append((img_id, img_path, score))
+        img_cap = id2caption[img_id][0].strip()
+        data.append((img_id, img_path, score, img_cap))
         if i >= top_K:
             break
 
     return render_template('show.html',
                            query_img_path=query_img_path,
                            query_img_id=query_img_id,
+                           query_caption=query_caption,
                            data=data,
                            method=method)
