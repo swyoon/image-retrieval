@@ -3,6 +3,8 @@ import json
 import yaml
 import h5py
 import numpy as np
+import re
+
 
 def load_files(path):
     if path.rsplit('.', 2)[-1] == 'json':
@@ -24,15 +26,16 @@ def load_files(path):
 
     return data
 
+
 def save_pickle(data, path):
     with open(path, 'wb') as f:
         pickle.dump(data, f, protocol=pickle.HIGHEST_PROTOCOL)
+
 
 def save_json(data, path):
     with open(path, 'w') as f:
         json.dump(data, f)
 
-import re
 
 def clean_str(string, lower = True):
     string = re.sub(r"[^A-Za-z0-9,!\']", " ", string)

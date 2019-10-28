@@ -55,6 +55,43 @@ def get_sim(vg_id_given, vg_id_compare,label, label_id2idx):
 
     return sim
 
+
+class Dset_VG_Pairwise(Dataset):
+    def __init__(self, cfg, sg, label, label_ids, vocab_glove, vocab2idx):
+        self.cfg = cfg
+        self.max_num_he = cfg['MODEL']['NUM_MAX_HE']
+        self.word_emb_size = cfg['MODEL']['WORD_EMB_SIZE']
+        self.sampling_steps = cfg['MODEL']['STEP']
+
+        self.sg = sg
+        self.sg_keys = list(self.sg.keys())
+        self.label = label
+        self.label_id2idx = {str(val): i for i, val in enumerate(label_ids)}
+
+        self.vocab_glove = vocab_glove
+        self.vocab2idx = vocab2idx
+
+    def __len__(self):
+        return len(self.sg)
+
+    def __getitem__(self, idx):
+        vg_img_id = self.sg_keys[idx]
+        sg_anchor = self.sg[vg_img_id]
+
+        compare_img = np.random.randint(len(self.sg), size=1)
+        compare_img_id = self.sg_keys[compare_img]
+        sim_score = get_sim(vg_img_id, compare_img_id, self.label, self.label_id2idx)
+        sg_compare = self.sg[compare_img_id]
+
+        word_vec_anchor = get_word_vec(sg_anchor, self.vocab2idx, self.vocab_glove)
+        word_vec_compare = get_word_vec(sg_compare, self.vocab2idx, self.vocab_glove)
+
+        HE_anchor = he_sampling(sg_anchor['adj'], word_vec_anchor, self.sampling_steps, self.max_num_he)
+        HE_compare = he_sampling(sg_compare['adj'], word_vec_compare, self.sampling_steps, self.max_num_he)
+
+        return HE_anchor, HE_compare, sim_score
+
+
 class Dset_VG_inference(Dataset):
     def __init__(self, cfg, train_sg, label, label_ids, vocab_glove, vocab2idx):
         self.cfg = cfg
@@ -82,6 +119,7 @@ class Dset_VG_inference(Dataset):
         HE_compare = he_sampling(sg_compare['adj'], word_vec_compare, self.sampling_steps, self.max_num_he)
 
         return HE_compare, vg_img_id
+
 
 class Dset_VG(Dataset):
     def __init__(self, cfg, sg, label, label_ids, vocab_glove, vocab2idx):
