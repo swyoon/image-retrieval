@@ -9,6 +9,7 @@ from model import HGAN
 import time
 from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
+from glob import glob
 
 
 def prop_mini_batch_infer(mini_batch_compare, vg_id_anchor, HE_anchor, label, label_id2idx, model):
@@ -24,10 +25,10 @@ def prop_mini_batch_infer(mini_batch_compare, vg_id_anchor, HE_anchor, label, la
     batch_anchor = HE_anchor.repeat([num_batch, 1, 1])
 
     if model.cfg['MODEL']['TARGET'] == 'SBERT':
-        score, loss = model(batch_anchor, HE_compare, sim_score)
+        score, loss, att_map = model(batch_anchor, HE_compare, sim_score, 'infer')
     else:
         score, _, loss = model(batch_anchor, HE_compare, HE_compare)
-    return score
+    return score, att_map
 
 
 def prop_mini_batch_sbert(mini_batch, model):
@@ -50,6 +51,7 @@ def prop_mini_batch_sbert(mini_batch, model):
 
     return score_p, loss
 
+
 def prop_mini_batch(mini_batch, model):
     HE_a, HE_p, HE_n = mini_batch
     HE_a = HE_a.cuda()
@@ -59,6 +61,49 @@ def prop_mini_batch(mini_batch, model):
     score_p, score_n, loss = model(HE_a, HE_p, HE_n)
 
     return score_p, score_n, loss
+
+
+def inference(model, sg_test, infer_dset, infer_dloader, args):
+    ckpt_path = args.ckpt_path + args.exp_name
+    ckpts = glob(os.path.join(ckpt_path, 'ckpt_*.pth.tar'))
+
+    if len(ckpts) == 0:
+        print("Error!, No saved models!")
+        return -1
+
+    num = []
+    for ckpt in ckpts:
+        tokens = ckpt.split('.')
+        num.append(int(tokens[-3].split('_')[-1]))
+
+    num.sort()
+    last_ckpt = os.path.join(ckpt_path, 'ckpt_' + str(num[-1]) + '.pth.tar')
+    print("Load the last model, epoch: %d" % (num[-1]))
+
+    checkpoint = torch.load(last_ckpt)
+    model.load_state_dict(checkpoint['state_dict'])
+    print("loaded checkpoint '{}' (epoch {})".format(ckpts[-1], checkpoint['idx_epoch']))
+
+    result_path = args.result_path + args.exp_name
+
+    while True:
+        vid = input("visual genome image id, -1 to break: ")
+        if vid == -1:
+            return 0
+        else:
+            vg_id_infer = str(vid)
+            infer_sg = sg_test[vg_id_infer]
+            word_vec_anchor = get_word_vec(infer_sg, infer_dset.vocab2idx, infer_dset.vocab_glove)
+            HE_anchor, HEs_anchor = he_sampling(infer_sg['adj'], word_vec_anchor, infer_dset.sampling_steps, infer_dset.max_num_he, 'infer')
+
+            infer_result = {}
+            for b_idx, mini_batch in enumerate(tqdm(infer_dloader)):
+                # HE_compare, vg_id_compare = mini_batch
+                score, att_map = prop_mini_batch_infer(mini_batch, vid, HE_anchor, infer_dset.label, infer_dset.label_id2idx, model)
+                score_arr = [s.item() for s in score]
+                infer_result.update(list(zip(mini_batch[1], score_arr)))
+
+            save_json(infer_result, result_path + '/infer_result_epoch_{}_vid_{}.json'.format(num[-1], vid))
 
 
 def main():
@@ -138,6 +183,9 @@ def main():
 
     model.cuda()
 
+    if args.inference == True:
+        inference(model, sg_test, infer_dset, infer_dloader, args)
+        return 0
     # ------------ Iteration -----------------------
     train_loss = []
     num_iter = 0
@@ -201,7 +249,7 @@ def main():
 
                 for b_idx, mini_batch in enumerate(tqdm(infer_dloader)):
                     # HE_compare, vg_id_compare = mini_batch
-                    score = prop_mini_batch_infer(mini_batch, vid, HE_anchor, infer_dset.label, infer_dset.label_id2idx, model)
+                    score, _ = prop_mini_batch_infer(mini_batch, vid, HE_anchor, infer_dset.label, infer_dset.label_id2idx, model)
                     score_arr = [s.item() for s in score]
                     infer_result.update( list(zip(mini_batch[1], score_arr)) )
 

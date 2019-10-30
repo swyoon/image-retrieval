@@ -7,7 +7,7 @@ def sampling(prob):
     return np.random.choice(len(prob), 1, p=prob)
 
 
-def he_sampling(adj, word_vec, num_steps, max_num_he, eps_prob=0.001, word_emb_size=300):
+def he_sampling(adj, word_vec, num_steps, max_num_he, mode, eps_prob=0.001, word_emb_size=300):
     # word_vec: N x 300 word embeddings
 
     n_nodes = adj.shape[0]
@@ -39,7 +39,10 @@ def he_sampling(adj, word_vec, num_steps, max_num_he, eps_prob=0.001, word_emb_s
     he_emb_temp = np.vstack(he_emb_temp)
     he_emb[:he_emb_temp.shape[0]] = he_emb_temp
 
-    return he_emb
+    if mode=='train':
+        return he_emb
+    else:
+        return he_emb, np.array(HEs)
 
 
 def get_word_vec(sg, vocab2idx, vocab_glove):
@@ -118,14 +121,17 @@ class Dset_VG_Pairwise(Dataset):
         sim_score = [ get_sim(vg_img_id, i, self.label, self.label_id2idx) for i in compare_img_id]
         sg_compare = np.array([ self.sg[i] for i in compare_img_id ])
 
-
         word_vec_anchor = get_word_vec(sg_anchor, self.vocab2idx, self.vocab_glove)
         word_vec_compare = [ get_word_vec(i, self.vocab2idx, self.vocab_glove) for i in sg_compare]
 
-        HE_anchor = np.array( [he_sampling(sg_anchor['adj'], word_vec_anchor,
-                                   self.sampling_steps, self.max_num_he) for i in range(len(compare_img_idx)) ])
-        HE_compare = np.array([ he_sampling(sg_compare[i]['adj'], word_vec_compare[i],
-                                   self.sampling_steps, self.max_num_he) for i in range(len(compare_img_idx)) ])
+        HE_anchor = np.array(
+                    [he_sampling(sg_anchor['adj'], word_vec_anchor, self.sampling_steps, self.max_num_he, 'train')
+                                   for i in range(len(compare_img_idx)) ]
+                    )
+        HE_compare = np.array(
+                    [he_sampling(sg_compare[i]['adj'], word_vec_compare[i],self.sampling_steps, self.max_num_he, 'train')
+                                    for i in range(len(compare_img_idx)) ]
+                    )
 
         return HE_anchor, HE_compare, np.reshape(sim_score, [-1, 1])
 
@@ -154,7 +160,7 @@ class Dset_VG_inference(Dataset):
 
         word_vec_compare = get_word_vec(sg_compare, self.vocab2idx, self.vocab_glove)
 
-        HE_compare = he_sampling(sg_compare['adj'], word_vec_compare, self.sampling_steps, self.max_num_he)
+        HE_compare, HEs = he_sampling(sg_compare['adj'], word_vec_compare, self.sampling_steps, self.max_num_he, 'infer')
 
         return HE_compare, vg_img_id
 

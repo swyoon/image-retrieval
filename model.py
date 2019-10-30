@@ -78,19 +78,22 @@ class HGAN(nn.Module):
 
         score = self.fc_score(out)
         #score = F.relu(score)
-        return score
+        return score, att_map
 
-    def forward(self, he_anchor, he_pos, he_neg):
+    def forward(self, he_anchor, he_pos, he_neg, mode='train'):
         #he_*: B x 100 x dim_word_emb
 
         if self.cfg['MODEL']['TARGET'] == 'SBERT':
             score_bert = torch.reshape(he_neg, (-1, 1))
-            score_p = self.score(he_anchor, he_pos)
+            score_p, att_map = self.score(he_anchor, he_pos)
             loss = self.loss(score_p, score_bert)
-            return score_p, loss
+            if mode=='train':
+                return score_p, loss
+            else:
+                return score_p, loss, att_map
         else:
-            score_p = self.score(he_anchor, he_pos)
-            score_n = self.score(he_anchor, he_neg)
+            score_p,_ = self.score(he_anchor, he_pos)
+            score_n,_ = self.score(he_anchor, he_neg)
 
             loss = self.loss(score_p, score_n)
 
