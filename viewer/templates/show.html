@@ -12,14 +12,15 @@
   <body>
   <h2> Query image: </h2>
   <img src="{{ url_for('static', filename=query_img_path) }}" class="center">
-  <p style="text-align:center">{{ query_img_id }} </p>
+  <p style="text-align:center">{{ query_img_id }} <br> {{ query_caption }} </p>
   <h2> Top {{ data | length }} similar images: </h2>
   <div class="row">
       {% for datum in data %}  <!-- (img_id, img_path, similarity_score)  -->
         <div>
         <img src="{{ url_for('static', filename=datum[1]) }}">
         <p>{{ datum[0] }} <br>  <!-- img id -->
-           {{ datum[2] | round(3) }}  <!-- similarity score -->
+            {{ datum[2] | round(3) }} <br>  <!-- similarity score -->
+            {{ datum[3] }}
         </p>
 
         </div>
