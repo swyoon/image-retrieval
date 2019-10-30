@@ -1,5 +1,6 @@
 import numpy as np
 from torch.utils.data import Dataset
+import operator
 
 
 def sampling(prob):
@@ -40,6 +41,7 @@ def he_sampling(adj, word_vec, num_steps, max_num_he, eps_prob=0.001, word_emb_s
 
     return he_emb
 
+
 def get_word_vec(sg, vocab2idx, vocab_glove):
     node_labels = sg['node_labels']
     word_vec = []
@@ -48,12 +50,25 @@ def get_word_vec(sg, vocab2idx, vocab_glove):
         word_vec.append( vocab_glove[idx_glove] )
     return np.vstack(word_vec)
 
+
 def get_sim(vg_id_given, vg_id_compare,label, label_id2idx):
     idx_given = label_id2idx[vg_id_given]
     idx_compare = label_id2idx[vg_id_compare]
     sim = label[idx_given][idx_compare]
 
     return sim
+
+def upsampling(sorted_vg_id, tail_range):
+    pos_idx = np.random.randint(tail_range, size=1)
+    pos_vg_id = sorted_vg_id[pos_idx]
+
+    neutral_idx = np.random.randint( len(sorted_vg_id)-2*tail_range, size=1 )
+    neutral_vg_id = sorted_vg_id[tail_range+neutral_idx]
+
+    neg_idx = np.random.randint(tail_range, size=1)
+    neg_vg_id = sorted_vg_id[-neg_idx]
+
+    return pos_vg_id, neutral_vg_id, neg_vg_id
 
 
 class Dset_VG_Pairwise(Dataset):
@@ -69,7 +84,11 @@ class Dset_VG_Pairwise(Dataset):
             self.test_sg = test_sg
             self.test_sg_keys = list(self.test_sg.keys())
         self.label = label
+        self.vg_id_list = label_ids
         self.label_id2idx = {str(val): i for i, val in enumerate(label_ids)}
+
+        self.label_id2idx_train = [self.label_id2idx[id] for id in self.sg_keys]
+        self.tail_range = cfg['MODEL']['TAIL_RANGE']
 
         self.vocab_glove = vocab_glove
         self.vocab2idx = vocab2idx
@@ -88,18 +107,27 @@ class Dset_VG_Pairwise(Dataset):
             vg_img_id = self.test_sg_keys[idx]
             sg_anchor = self.test_sg[vg_img_id]
 
-        compare_img = np.random.randint(len(self.sg), size=1)
-        compare_img_id = self.sg_keys[compare_img[0]]
-        sim_score = get_sim(vg_img_id, compare_img_id, self.label, self.label_id2idx)
-        sg_compare = self.sg[compare_img_id]
+        score = self.label[self.label_id2idx[vg_img_id]][self.label_id2idx_train]
+        sorted_idx = np.argsort(score)[::-1]
+
+        pos_vg_idx, neutral_vg_idx, neg_vg_idx = upsampling(sorted_idx, self.tail_range)
+
+        compare_img_idx = [pos_vg_idx.item(), neutral_vg_idx.item(), neg_vg_idx.item()]
+        #compare_img = np.random.randint(len(self.sg), size=1)
+        compare_img_id = [ self.sg_keys[i] for i in compare_img_idx]
+        sim_score = [ get_sim(vg_img_id, i, self.label, self.label_id2idx) for i in compare_img_id]
+        sg_compare = np.array([ self.sg[i] for i in compare_img_id ])
+
 
         word_vec_anchor = get_word_vec(sg_anchor, self.vocab2idx, self.vocab_glove)
-        word_vec_compare = get_word_vec(sg_compare, self.vocab2idx, self.vocab_glove)
+        word_vec_compare = [ get_word_vec(i, self.vocab2idx, self.vocab_glove) for i in sg_compare]
 
-        HE_anchor = he_sampling(sg_anchor['adj'], word_vec_anchor, self.sampling_steps, self.max_num_he)
-        HE_compare = he_sampling(sg_compare['adj'], word_vec_compare, self.sampling_steps, self.max_num_he)
+        HE_anchor = np.array( [he_sampling(sg_anchor['adj'], word_vec_anchor,
+                                   self.sampling_steps, self.max_num_he) for i in range(len(compare_img_idx)) ])
+        HE_compare = np.array([ he_sampling(sg_compare[i]['adj'], word_vec_compare[i],
+                                   self.sampling_steps, self.max_num_he) for i in range(len(compare_img_idx)) ])
 
-        return HE_anchor, HE_compare, sim_score
+        return HE_anchor, HE_compare, np.reshape(sim_score, [-1, 1])
 
 
 class Dset_VG_inference(Dataset):
@@ -131,6 +159,7 @@ class Dset_VG_inference(Dataset):
         return HE_compare, vg_img_id
 
 
+#for triplet loss
 class Dset_VG(Dataset):
     def __init__(self, cfg, sg, label, label_ids, vocab_glove, vocab2idx):
         self.cfg =cfg

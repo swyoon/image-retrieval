@@ -32,7 +32,7 @@ class HGAN(nn.Module):
         self.softmax_att = torch.nn.Softmax(dim=2)
         self.fc_score = torch.nn.Linear(self.nhidden*self.nhead, 1)
 
-        self.margin = cfg['MODEL']['LOSS_MARGIN']
+        #self.margin = cfg['MODEL']['LOSS_MARGIN']
         if self.cfg['MODEL']['TARGET'] == 'SBERT':
             self.loss = nn.MSELoss()
         else:

@@ -24,7 +24,6 @@ def prop_mini_batch_infer(mini_batch_compare, vg_id_anchor, HE_anchor, label, la
     batch_anchor = HE_anchor.repeat([num_batch, 1, 1])
 
     if model.cfg['MODEL']['TARGET'] == 'SBERT':
-
         score, loss = model(batch_anchor, HE_compare, sim_score)
     else:
         score, _, loss = model(batch_anchor, HE_compare, HE_compare)
@@ -34,8 +33,18 @@ def prop_mini_batch_infer(mini_batch_compare, vg_id_anchor, HE_anchor, label, la
 def prop_mini_batch_sbert(mini_batch, model):
     HE_a, HE_p, sbert_score = mini_batch
     HE_a = HE_a.cuda()
-    HE_p = HE_p.cuda()
-    sbert_score = sbert_score.cuda()
+    if len(HE_a.shape) == 4:
+        num_batch = HE_a.shape[0]
+        num_samples = HE_a.shape[1]
+        flat_HE_a = torch.reshape( HE_a, (num_batch*num_samples, HE_a.shape[2], HE_a.shape[3]) )
+        HE_a = flat_HE_a.cuda()
+        flat_HE_p = torch.reshape( HE_p, (num_batch*num_samples, HE_p.shape[2], HE_p.shape[3]) )
+        flat_sbert_score = torch.reshape( sbert_score, (num_batch*num_samples, -1))
+        HE_p = flat_HE_p.cuda()
+        sbert_score = flat_sbert_score.cuda()
+    else:
+        HE_p = HE_p.cuda()
+        sbert_score = sbert_score.cuda()
 
     score_p, loss = model(HE_a, HE_p, sbert_score)
 
@@ -55,16 +64,16 @@ def prop_mini_batch(mini_batch, model):
 def main():
     ''' parse config file '''
     parser = argparse.ArgumentParser(description="Hypergraph Attention Networks for CBIR on VG dataset")
-    parser.add_argument("--config_file", default="configs/han_baseline.yaml")
-    parser.add_argument("--exp_name", default="han_sbert_regression")
+    parser.add_argument("--config_file", default="configs/han_sbert_tail_sampling.yaml")
+    parser.add_argument("--exp_name", default="han_sbert_tail_sampling_100_3")
     parser.add_argument("--trg_opt", type=str, default='SBERT')
     parser.add_argument("--resume", type=int, default=0)
     parser.add_argument("--inference", action='store_true')
     parser.add_argument("--instance", type=int, default=30)
     parser.add_argument("--visualize", action='store_true')
     parser.add_argument("--debug", action='store_true')
-    parser.add_argument("--num_workers", type=int, default=16)
-    parser.add_argument("--max_epoch", type=int, default=100)
+    parser.add_argument("--num_workers", type=int, default=32)
+    parser.add_argument("--max_epoch", type=int, default=500)
     parser.add_argument("--tb_path", type=str, default='/data/project/rw/CBIR/tb/')
     parser.add_argument("--result_path", type=str, default='/data/project/rw/CBIR/results/')
     parser.add_argument("--ckpt_path", type=str, default='/data/project/rw/CBIR/ckpt/')
@@ -155,16 +164,16 @@ def main():
                 summary.add_scalar('loss/train', loss.item(), num_iter)
 
             num_iter += 1
-            break
 
         lr_scheduler.step()
 
-        torch.save({'idx_epoch': idx_epoch,
-                    'num_iter': num_iter,
-                    'state_dict': model.state_dict(),
-                    'optimizer': optimizer.state_dict()},
-                   os.path.join(ckpt_path, 'ckpt_%d.pth.tar' % (idx_epoch)))
-        torch.save(model, os.path.join(ckpt_path, 'model.pth'))
+        if args.debug == False:
+            torch.save({'idx_epoch': idx_epoch,
+                        'num_iter': num_iter,
+                        'state_dict': model.state_dict(),
+                        'optimizer': optimizer.state_dict()},
+                       os.path.join(ckpt_path, 'ckpt_%d.pth.tar' % (idx_epoch)))
+            torch.save(model, os.path.join(ckpt_path, 'model.pth'))
 
         torch.set_grad_enabled(False)
         model.eval()
@@ -179,10 +188,9 @@ def main():
             if args.debug == False:
                 summary.add_scalar('loss/test', loss.item(), num_iter_test)
             num_iter_test += 1
-            break
 
         # ------------ Full Inference -----------------------
-        if idx_epoch % 10 == 0:
+        if idx_epoch > 0 and idx_epoch % 20 == 0:
             infer_results = {}
             for idx_infer, vid in enumerate(vg_id_infer):
                 print("INFERENCE, epoch: {}, num_infer: {}".format(idx_epoch, idx_infer))
@@ -195,11 +203,12 @@ def main():
                     # HE_compare, vg_id_compare = mini_batch
                     score = prop_mini_batch_infer(mini_batch, vid, HE_anchor, infer_dset.label, infer_dset.label_id2idx, model)
                     score_arr = [s.item() for s in score]
-                    infer_result.update( list(zip(vg_id_compare, score_arr)) )
+                    infer_result.update( list(zip(mini_batch[1], score_arr)) )
 
                 infer_results[vid] = infer_result
 
-            save_json(infer_results, result_path+'/infer_result_epoch_{}.json'.format(idx_epoch))
+            if args.debug == False:
+                save_json(infer_results, result_path+'/infer_result_epoch_{}.json'.format(idx_epoch))
 
 
 if __name__ == "__main__":
