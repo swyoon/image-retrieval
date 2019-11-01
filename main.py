@@ -10,6 +10,7 @@ import time
 from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
 from glob import glob
+import pandas as pd
 
 
 def prop_mini_batch_infer(mini_batch_compare, vg_id_anchor, HE_anchor, label, label_id2idx, model):
@@ -85,10 +86,11 @@ def inference(model, sg_test, infer_dset, infer_dloader, args):
     print("loaded checkpoint '{}' (epoch {})".format(ckpts[-1], checkpoint['idx_epoch']))
 
     result_path = args.result_path + args.exp_name
+    result_viewer_path = '/data/rw/project/viewer_CBIR/viewer/results/{}_epoch_{}'.format(args.exp_name, ckpts[-1])
 
     while True:
         vid = input("visual genome image id, -1 to break: ")
-        if vid == -1:
+        if vid == '-1':
             return 0
         else:
             vg_id_infer = str(vid)
@@ -100,10 +102,21 @@ def inference(model, sg_test, infer_dset, infer_dloader, args):
             for b_idx, mini_batch in enumerate(tqdm(infer_dloader)):
                 # HE_compare, vg_id_compare = mini_batch
                 score, att_map = prop_mini_batch_infer(mini_batch, vid, HE_anchor, infer_dset.label, infer_dset.label_id2idx, model)
-                score_arr = [s.item() for s in score]
-                infer_result.update(list(zip(mini_batch[1], score_arr)))
 
-            save_json(infer_result, result_path + '/infer_result_epoch_{}_vid_{}.json'.format(num[-1], vid))
+                if args.visualize_att:
+                    for idx_m in range(len(mini_batch[1])):
+                        infer_result[mini_batch[1][idx_m]] = {"score": score[idx_m].item(), "att": att_map[idx_m].item()}
+                else:
+                    score_arr = [s.item() for s in score]
+                    infer_result.update(list(zip(mini_batch[1], score_arr)))
+
+            if args.visualize_att:
+                save_json(infer_result, result_path + '/infer_result_w_att_epoch_{}_vid_{}.json'.format(num[-1], vid))
+            else:
+                data_pandes = pd.DataFrame.from_dict(infer_result, orient='index')
+                data_pandes.to_csv(result_viewer_path+'/{}.tsv'.format(vid), sep='\t', header=False, index=False)
+                save_json(infer_result, result_path + '/infer_result_w_att_epoch_{}_vid_{}.json'.format(num[-1], vid))
+
 
 
 def main():
@@ -115,7 +128,7 @@ def main():
     parser.add_argument("--resume", type=int, default=0)
     parser.add_argument("--inference", action='store_true')
     parser.add_argument("--instance", type=int, default=30)
-    parser.add_argument("--visualize", action='store_true')
+    parser.add_argument("--visualize_att", action='store_true')
     parser.add_argument("--debug", action='store_true')
     parser.add_argument("--num_workers", type=int, default=32)
     parser.add_argument("--max_epoch", type=int, default=500)
