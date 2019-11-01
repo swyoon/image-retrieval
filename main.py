@@ -110,7 +110,7 @@ def main():
     ''' parse config file '''
     parser = argparse.ArgumentParser(description="Hypergraph Attention Networks for CBIR on VG dataset")
     parser.add_argument("--config_file", default="configs/han_sbert_tail_sampling.yaml")
-    parser.add_argument("--exp_name", default="han_sbert_tail_sampling_100_3")
+    parser.add_argument("--exp_name", default="han_sbert_tail_6_in_100_HE_100_3")
     parser.add_argument("--trg_opt", type=str, default='SBERT')
     parser.add_argument("--resume", type=int, default=0)
     parser.add_argument("--inference", action='store_true')
@@ -162,14 +162,11 @@ def main():
     print("loaded label data {}s".format(time.time()-tic))
 
     # ------------ Construct Dataset Class ------------------------------------
-    if model_cfg['MODEL']['TARGET'] == 'SBERT':
-        train_dset = Dset_VG_Pairwise(model_cfg, sg_train, sg_test, label_similarity, label_vg_ids, vocab_glove, vocab2idx, 'train')
-        test_dset = Dset_VG_Pairwise(model_cfg, sg_train, sg_test, label_similarity, label_vg_ids, vocab_glove, vocab2idx, 'test')
-        test_dloader = DataLoader(test_dset, batch_size=model_cfg['MODEL']['BATCH_SIZE'], num_workers=args.num_workers, shuffle=False)
-    else:
-        train_dset = Dset_VG(model_cfg, sg_train, label_similarity, label_vg_ids, vocab_glove, vocab2idx)
-
-    train_dloader = DataLoader(train_dset, batch_size=model_cfg['MODEL']['BATCH_SIZE'], num_workers=args.num_workers, shuffle=True)
+    train_dset = Dset_VG_Pairwise(model_cfg, sg_train, label_similarity, label_vg_ids, vocab_glove, vocab2idx, 'train')
+    train_dloader = DataLoader(train_dset, batch_size=model_cfg['MODEL']['BATCH_SIZE'], num_workers=args.num_workers,
+                           shuffle=True)
+    test_dset = Dset_VG_Pairwise(model_cfg, sg_test, label_similarity, label_vg_ids, vocab_glove, vocab2idx, 'test')
+    test_dloader = DataLoader(test_dset, batch_size=model_cfg['MODEL']['BATCH_SIZE'], num_workers=args.num_workers, shuffle=False)
 
     infer_dset = Dset_VG_inference(model_cfg, sg_train, label_similarity, label_vg_ids, vocab_glove, vocab2idx)
     infer_dloader = DataLoader(infer_dset, batch_size=model_cfg['MODEL']['BATCH_SIZE'], num_workers=args.num_workers, shuffle=False)
@@ -212,6 +209,7 @@ def main():
                 summary.add_scalar('loss/train', loss.item(), num_iter)
 
             num_iter += 1
+            break
 
         lr_scheduler.step()
 

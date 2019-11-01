@@ -6,7 +6,7 @@ def run_train():
     subprocess.call([
         'python', 'main.py',
         #'--config_file', 'configs/han_sbert.yaml',
-        '--inference',
+        #'--inference',
         #'--debug'
     ])
 

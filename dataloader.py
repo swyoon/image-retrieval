@@ -61,21 +61,23 @@ def get_sim(vg_id_given, vg_id_compare,label, label_id2idx):
 
     return sim
 
-def upsampling(sorted_vg_id, tail_range):
-    pos_idx = np.random.randint(tail_range, size=1)
-    pos_vg_id = sorted_vg_id[pos_idx]
+def upsampling(sorted_vg_id, tail_range, num_sample_per_range):
+    id_list = []
 
-    neutral_idx = np.random.randint( len(sorted_vg_id)-2*tail_range, size=1 )
-    neutral_vg_id = sorted_vg_id[tail_range+neutral_idx]
+    pos_idx = np.random.randint(tail_range, size=num_sample_per_range)
+    id_list.extend([sorted_vg_id[i].item() for i in pos_idx])
 
-    neg_idx = np.random.randint(tail_range, size=1)
-    neg_vg_id = sorted_vg_id[-neg_idx]
+    neutral_idx = np.random.randint( len(sorted_vg_id)-2*tail_range, size=num_sample_per_range )
+    id_list.extend([sorted_vg_id[i+tail_range].item() for i in neutral_idx])
 
-    return pos_vg_id, neutral_vg_id, neg_vg_id
+    neg_idx = np.random.randint(tail_range, size=num_sample_per_range)
+    id_list.extend([sorted_vg_id[-i].item() for i in neg_idx])
+
+    return id_list
 
 
 class Dset_VG_Pairwise(Dataset):
-    def __init__(self, cfg, sg, test_sg, label, label_ids, vocab_glove, vocab2idx, mode):
+    def __init__(self, cfg, sg, label, label_ids, vocab_glove, vocab2idx, mode):
         self.cfg = cfg
         self.max_num_he = cfg['MODEL']['NUM_MAX_HE']
         self.word_emb_size = cfg['MODEL']['WORD_EMB_SIZE']
@@ -83,40 +85,31 @@ class Dset_VG_Pairwise(Dataset):
 
         self.sg = sg
         self.sg_keys = list(self.sg.keys())
-        if mode == 'test':
-            self.test_sg = test_sg
-            self.test_sg_keys = list(self.test_sg.keys())
         self.label = label
         self.vg_id_list = label_ids
         self.label_id2idx = {str(val): i for i, val in enumerate(label_ids)}
 
-        self.label_id2idx_train = [self.label_id2idx[id] for id in self.sg_keys]
+        self.label_id2idx_split = [self.label_id2idx[id] for id in self.sg_keys]
         self.tail_range = cfg['MODEL']['TAIL_RANGE']
-
+        self.num_sample_per_range = cfg['MODEL']['NUM_SAMPLE_PER_RANGE']
         self.vocab_glove = vocab_glove
         self.vocab2idx = vocab2idx
         self.mode = mode
 
     def __len__(self):
-        if self.mode == 'test':
-            return len(self.test_sg)
         return len(self.sg)
 
     def __getitem__(self, idx):
-        if self.mode == 'train':
-            vg_img_id = self.sg_keys[idx]
-            sg_anchor = self.sg[vg_img_id]
-        elif self.mode == 'test':
-            vg_img_id = self.test_sg_keys[idx]
-            sg_anchor = self.test_sg[vg_img_id]
+        vg_img_id = self.sg_keys[idx]
+        sg_anchor = self.sg[vg_img_id]
 
-        score = self.label[self.label_id2idx[vg_img_id]][self.label_id2idx_train]
+        score = self.label[self.label_id2idx[vg_img_id]][self.label_id2idx_split]
         sorted_idx = np.argsort(score)[::-1]
 
-        pos_vg_idx, neutral_vg_idx, neg_vg_idx = upsampling(sorted_idx, self.tail_range)
-
-        compare_img_idx = [pos_vg_idx.item(), neutral_vg_idx.item(), neg_vg_idx.item()]
+        compare_img_idx = upsampling(sorted_idx, self.tail_range, self.num_sample_per_range)
+        #compare_img_idx = [pos_vg_idx.item(), neutral_vg_idx.item(), neg_vg_idx.item()]
         #compare_img = np.random.randint(len(self.sg), size=1)
+
         compare_img_id = [ self.sg_keys[i] for i in compare_img_idx]
         sim_score = [ get_sim(vg_img_id, i, self.label, self.label_id2idx) for i in compare_img_id]
         sg_compare = np.array([ self.sg[i] for i in compare_img_id ])
