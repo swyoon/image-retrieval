@@ -1,6 +1,7 @@
 """
 compute_ndcg.py
 ===============
+Parallelized version. Not very efficient.
 Computes Normalized Discounted Cumulative Gain (NDCG)
 """
 import numpy as np
@@ -13,6 +14,7 @@ from collections import defaultdict
 import time
 import argparse
 from tqdm import tqdm
+from joblib import Parallel, delayed
 
 #
 #  Configuration
@@ -22,6 +24,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('model_name', type=str, help='The name of directory to be searched for predicted similarity score')
 parser.add_argument('--resultdir', type=str, default='/data/project/rw/viewer_CBIR/viewer/results/')
 parser.add_argument('--query', type=str, default='all', help='list of query ids. comma separated.')
+parser.add_argument('--par', type=int, default=6, help='The number of workers for parallelization')
 args = parser.parse_args()
 
 pred_sim_dir = os.path.join(args.resultdir, args.model_name)
@@ -34,6 +37,7 @@ else:
     l_query_id = args.query.strip().split(',')
     print(f'running for {l_query_id}')
 print(f'running for {len(l_query_id)} queries')
+print(f'using {args.par} workders')
 
 #
 # Functions
@@ -148,6 +152,7 @@ def get_train_test_split(split_json='/data/project/rw/CBIR/img_split.json'):
             l_test_id.append(vg_id)
     return sorted(l_train_id), sorted(l_test_id)
 
+
 class BERTSimilarityInMem:
     """class for handling SBERT similarity file from IMLAB
     Identical to BERTSimilarity, but loads all similarity metric in memory"""
@@ -164,6 +169,39 @@ class BERTSimilarityInMem:
         return self.sims[str(img_id_1)][img_idx_2]
 
 
+def compute(query_id, sim_array):
+    """main function for computing NDCG"""
+    # d_result = {k: [] for k in ks}
+    d_result = {}
+    time_1 = time.time()
+    query_sim_file = os.path.join(pred_sim_dir, query_id + '.tsv')
+    df_pred_sim = pd.read_csv(query_sim_file, header=None, sep='\t')
+    time_2 = time.time()
+    # print(f'1 {time_2 - time_1}')
+
+    l_candidate_idx = np.array([id2idx[str(img_id)] for img_id in df_pred_sim[0]])
+    # l_candidate_id = list(df_pred_sim[0])
+
+    time_3 = time.time()
+    # print(f'2 {time_3 - time_2}')
+    # with h5py.File("/data/public/rw/datasets/visual_genome/BERT_feature/SBERT_sims_float16.hdf5", "r") as f_sbert:
+    #     true_sim = torch.tensor([f_sbert[f'/sims/{query_id}'][img_idx] for img_idx in l_candidate_idx]).view(1, -1)
+    # true_sim = torch.tensor([sbert_sim.get_similarity(query_id, img_id) for img_id in l_candidate_id]).view(1, -1)
+    true_sim = torch.tensor([sim_array[img_idx] for img_idx in l_candidate_idx]).view(1, -1)
+    pred_sim = torch.tensor(df_pred_sim[1].values).view(1, -1)
+
+    time_4 = time.time()
+    # print(f'3 {time_4 - time_3}')
+    d_ndcg = ndcg_batch(pred_sim, true_sim, ks=ks)
+    return d_ndcg
+    # for k in ks:
+    #     # d_result[k].append(d_ndcg[k])
+    #     d_result[k] = d_ndcg[k]
+    # time_5 = time.time()
+    # # print(f'4 {time_5 - time_4}')
+    # return d_result
+
+
 
 """load true similarity files"""
 # f_sbert = h5py.File("/data/public/rw/datasets/visual_genome/BERT_feature/SBERT_sims.hdf5", "r")
@@ -174,37 +212,16 @@ ids = f_sbert['id'][:]
 id2idx = {str(img_id): idx for idx, img_id in enumerate(ids)}  
 sbert_sim = BERTSimilarityInMem('/data/public/rw/datasets/visual_genome/BERT_feature/SBERT_sims_float16.hdf5')
 
+
 """load train/test split"""
 l_train_id, l_test_id = get_train_test_split()
 ks = (5, 10, 20, 30, 40, 50)
 d_result = {k: [] for k in ks}
 
-
-for query_id in tqdm(l_query_id):
-    time_1 = time.time()
-    query_sim_file = os.path.join(pred_sim_dir, query_id + '.tsv')
-    df_pred_sim = pd.read_csv(query_sim_file, header=None, sep='\t')
-    time_2 = time.time()
-    # print(f'1 {time_2 - time_1}')
-
-    # l_candidate_idx = np.array([id2idx[str(img_id)] for img_id in df_pred_sim[0]])
-    l_candidate_id = list(df_pred_sim[0])
-
-    time_3 = time.time()
-    # print(f'2 {time_3 - time_2}')
-    # sanity check
-    # true_sim = torch.tensor([f_sbert[f'/sims/{query_id}'][img_idx] for img_idx in l_candidate_idx]).view(1, -1)
-    true_sim = torch.tensor([sbert_sim.get_similarity(query_id, img_id) for img_id in l_candidate_id]).view(1, -1)
-    pred_sim = torch.tensor(df_pred_sim[1].values).view(1, -1)
-
-    time_4 = time.time()
-    # print(f'3 {time_4 - time_3}')
-    d_ndcg = ndcg_batch(pred_sim, true_sim, ks=ks)
-    for k in ks:
-        d_result[k].append(d_ndcg[k])
-    time_5 = time.time()
-    # print(f'4 {time_5 - time_4}')
-
+l_result = Parallel(n_jobs=args.par)(delayed(compute)(query_id, sbert_sim.sims[query_id][:]) for query_id in tqdm(l_query_id))
+for k in ks:
+    for r in l_result:
+        d_result[k].append(r[k])
 
 
 d_result = {k: np.mean(v) for k, v in d_result.items()} 
