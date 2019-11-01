@@ -207,9 +207,10 @@ def main():
 
             if args.debug == False:
                 summary.add_scalar('loss/train', loss.item(), num_iter)
-
+            else:
+                break
             num_iter += 1
-            break
+
 
         lr_scheduler.step()
 
