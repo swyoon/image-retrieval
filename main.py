@@ -86,7 +86,10 @@ def inference(model, sg_test, infer_dset, infer_dloader, args):
     print("loaded checkpoint '{}' (epoch {})".format(ckpts[-1], checkpoint['idx_epoch']))
 
     result_path = args.result_path + args.exp_name
-    result_viewer_path = '/data/rw/project/viewer_CBIR/viewer/results/{}_epoch_{}'.format(args.exp_name, ckpts[-1])
+
+    result_viewer_path = '/data/project/rw/viewer_CBIR/viewer/results/{}_epoch_{}'.format(args.exp_name, num[-1])
+    if not os.path.exists(result_viewer_path):
+        os.makedirs(result_viewer_path)
 
     while True:
         vid = input("visual genome image id, -1 to break: ")
@@ -113,8 +116,8 @@ def inference(model, sg_test, infer_dset, infer_dloader, args):
             if args.visualize_att:
                 save_json(infer_result, result_path + '/infer_result_w_att_epoch_{}_vid_{}.json'.format(num[-1], vid))
             else:
-                data_pandes = pd.DataFrame.from_dict(infer_result, orient='index')
-                data_pandes.to_csv(result_viewer_path+'/{}.tsv'.format(vid), sep='\t', header=False, index=False)
+                data_pandas = pd.DataFrame.from_dict(infer_result, orient='index')
+                data_pandas.to_csv(result_viewer_path+'/{}.tsv'.format(vid), sep='\t', header=False)#, index=False)
                 save_json(infer_result, result_path + '/infer_result_w_att_epoch_{}_vid_{}.json'.format(num[-1], vid))
 
 
@@ -247,10 +250,14 @@ def main():
             test_loss.append(loss.item())
             if args.debug == False:
                 summary.add_scalar('loss/test', loss.item(), num_iter_test)
+            else:
+                break
             num_iter_test += 1
 
+        """
         # ------------ Full Inference -----------------------
-        if idx_epoch > 0 and idx_epoch % 20 == 0:
+        #if idx_epoch > 0 and idx_epoch % 20 == 0:
+        if idx_epoch % 20 == 0:
             infer_results = {}
             for idx_infer, vid in enumerate(vg_id_infer):
                 print("INFERENCE, epoch: {}, num_infer: {}".format(idx_epoch, idx_infer))
@@ -269,7 +276,7 @@ def main():
 
             if args.debug == False:
                 save_json(infer_results, result_path+'/infer_result_epoch_{}.json'.format(idx_epoch))
-
+        """
 
 if __name__ == "__main__":
     main()
