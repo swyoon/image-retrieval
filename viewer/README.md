@@ -21,8 +21,13 @@ import os
 import pandas as pd
 
 # configuration
-result_path = '/data/rw/project/viewer_CBIR/viewer/results'
+result_dir = '/data/project/rw/viewer_CBIR/viewer/results'
 method_name = 'my_model'
+out_dir = os.path.join(result_dir, method_name)
+if not os.path.isdir(out_dir):
+    os.mkdir(out_dir)
+    print(f'creating {out_path}...')
+
 
 # example data
 query_img_id = 2315353
@@ -30,8 +35,9 @@ data = {'img_id': [713389, 2344690],
         'sim': [1.0, 0.1]}
 
 # save data
-data = pd.DataFrame(result)
-output_path = os.path.join(result_path, f'{method_name}/{query_img_id}.tsv')
+data = pd.DataFrame(data)
+output_path = os.path.join(out_dir, f'{query_img_id}.tsv')
 data[['img_id', 'sim']].to_csv(output_path,
                                sep='\t', header=False, index=False)
+print(f'Successfully saved at {output_path}')
 ```
