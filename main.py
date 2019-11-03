@@ -92,10 +92,11 @@ def inference(model, sg_test, infer_dset, infer_dloader, args):
         os.makedirs(result_viewer_path)
 
     while True:
-        vid = input("visual genome image id, -1 to break: ")
-        if vid == '-1':
-            return 0
-        else:
+        vids = input("visual genome image id in a list form: ")
+        if vids == [-1]:
+            break
+
+        for vid in vids:
             vg_id_infer = str(vid)
             infer_sg = sg_test[vg_id_infer]
             word_vec_anchor = get_word_vec(infer_sg, infer_dset.vocab2idx, infer_dset.vocab_glove)
