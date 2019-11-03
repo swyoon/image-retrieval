@@ -92,12 +92,13 @@ def inference(model, sg_test, infer_dset, infer_dloader, args):
         os.makedirs(result_viewer_path)
 
     while True:
-        vids = input("visual genome image id in a list form: ")
-        if vids == [-1]:
+        vids = input("visual genome image id, comma separated ")
+        if vids == '-1':
             break
 
+        vids = vids.strip().split(',')
         for vid in vids:
-            vg_id_infer = str(vid)
+            vg_id_infer = str(vid.strip())
             infer_sg = sg_test[vg_id_infer]
             word_vec_anchor = get_word_vec(infer_sg, infer_dset.vocab2idx, infer_dset.vocab_glove)
             HE_anchor, HEs_anchor = he_sampling(infer_sg['adj'], word_vec_anchor, infer_dset.sampling_steps, infer_dset.max_num_he, 'infer')
