@@ -125,8 +125,10 @@ def inference(model, sg_test, infer_dset, infer_dloader, args):
 def main():
     ''' parse config file '''
     parser = argparse.ArgumentParser(description="Hypergraph Attention Networks for CBIR on VG dataset")
-    parser.add_argument("--config_file", default="configs/han_sbert_tail_sampling.yaml")
+
+    parser.add_argument("--config_file", default="configs/han_sbert_tail_sampling_he_step_3.yaml")
     parser.add_argument("--exp_name", default="han_sbert_tail_6_in_100_HE_100_3")
+
     parser.add_argument("--trg_opt", type=str, default='SBERT')
     parser.add_argument("--resume", type=int, default=0)
     parser.add_argument("--inference", action='store_true')
@@ -184,7 +186,7 @@ def main():
     test_dset = Dset_VG_Pairwise(model_cfg, sg_test, label_similarity, label_vg_ids, vocab_glove, vocab2idx, 'test')
     test_dloader = DataLoader(test_dset, batch_size=model_cfg['MODEL']['BATCH_SIZE'], num_workers=args.num_workers, shuffle=False)
 
-    infer_dset = Dset_VG_inference(model_cfg, sg_train, label_similarity, label_vg_ids, vocab_glove, vocab2idx)
+    infer_dset = Dset_VG_inference(model_cfg, sg_test, label_similarity, label_vg_ids, vocab_glove, vocab2idx)
     infer_dloader = DataLoader(infer_dset, batch_size=model_cfg['MODEL']['BATCH_SIZE'], num_workers=args.num_workers, shuffle=False)
 
     # ------------ Model -----------------------
