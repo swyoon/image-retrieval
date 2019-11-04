@@ -91,12 +91,20 @@ def inference(model, sg_test, infer_dset, infer_dloader, args):
     if not os.path.exists(result_viewer_path):
         os.makedirs(result_viewer_path)
 
-    while True:
-        vids = input("visual genome image id, comma separated ")
-        if vids == '-1':
-            break
+    path_test_img_id_1000 = '/data/project/rw/CBIR/test_id_1000.json'
+    test_img_id_1000 = load_files(path_test_img_id_1000)
 
-        vids = vids.strip().split(',')
+    while True:
+        vids = input("visual genome image id, comma separated : ")
+        if int(vids) == -1:
+            break
+        elif int(vids) == 100:
+            vids = test_img_id_1000[:100]
+        elif int(vids) == '1000':
+            vids = test_img_id_1000
+        else:
+            vids = vids.strip().split(',')
+
         for vid in vids:
             vg_id_infer = str(vid.strip())
             infer_sg = sg_test[vg_id_infer]
