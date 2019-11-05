@@ -22,6 +22,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('model_name', type=str, help='The name of directory to be searched for predicted similarity score')
 parser.add_argument('--resultdir', type=str, default='/data/project/rw/viewer_CBIR/viewer/results/')
 parser.add_argument('--query', type=str, default='all', help='list of query ids. comma separated.')
+parser.add_argument('--zero-baseline', action='store_true')
 args = parser.parse_args()
 
 pred_sim_dir = os.path.join(args.resultdir, args.model_name)
@@ -39,6 +40,11 @@ else:
     l_query_id = args.query.strip().split(',')
     print(f'running for {l_query_id}')
 print(f'running for {len(l_query_id)} queries')
+
+if args.zero_baseline:
+    print('adjust the smallest similarity score to zero')
+else:
+    print('Using raw similarity score')
 
 #
 # Functions
@@ -193,13 +199,19 @@ for query_id in tqdm(l_query_id):
     # print(f'1 {time_2 - time_1}')
 
     # l_candidate_idx = np.array([id2idx[str(img_id)] for img_id in df_pred_sim[0]])
+
+    df_pred_sim = df_pred_sim.drop(index=df_pred_sim.index[df_pred_sim[0]==int(query_id)])
     l_candidate_id = list(df_pred_sim[0])
+    # l_candidate_id = [id_ for id_ in list(df_pred_sim[0]) if str(id_) != query_id]  # remove self
 
     time_3 = time.time()
     # print(f'2 {time_3 - time_2}')
     # sanity check
     # true_sim = torch.tensor([f_sbert[f'/sims/{query_id}'][img_idx] for img_idx in l_candidate_idx]).view(1, -1)
-    true_sim = torch.tensor([sbert_sim.get_similarity(query_id, img_id) for img_id in l_candidate_id]).view(1, -1)
+    true_sim = torch.tensor([sbert_sim.get_similarity(query_id, img_id) for img_id in l_candidate_id]).view(1, -1).to(dtype=torch.float)
+
+    if args.zero_baseline:
+        true_sim -= 0.59
     pred_sim = torch.tensor(df_pred_sim[1].values).view(1, -1)
 
     time_4 = time.time()
