@@ -30,6 +30,11 @@ print(f'Computing NDCG for {pred_sim_dir}...')
 if args.query == 'all':
     l_query_id = [s.split('.')[0] for s in os.listdir(pred_sim_dir)]
     print(f'running for all tsv files in {pred_sim_dir}')
+elif args.query == 'paper':
+    selected_id_file = 'test_id_1000.json'
+    with open(selected_id_file, 'r') as f:
+        l_query_id = json.load(f)
+    print(f'running for selected ids in {selected_id_file}')
 else:
     l_query_id = args.query.strip().split(',')
     print(f'running for {l_query_id}')
