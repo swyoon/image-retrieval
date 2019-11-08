@@ -91,7 +91,7 @@ def inference(model, sg_test, infer_dset, infer_dloader, args):
     if not os.path.exists(result_viewer_path):
         os.makedirs(result_viewer_path)
 
-    path_test_img_id_1000 = '/data/project/rw/CBIR/test_id_1000.json'
+    path_test_img_id_1000 = '/data/project/rw/CBIR/test_id_1000_v2.json'
     test_img_id_1000 = load_files(path_test_img_id_1000)
 
     while True:
