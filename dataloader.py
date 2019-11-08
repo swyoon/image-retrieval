@@ -1,6 +1,7 @@
 import numpy as np
 from torch.utils.data import Dataset
 import operator
+import os
 
 
 def sampling(prob):
@@ -129,6 +130,69 @@ class Dset_VG_Pairwise(Dataset):
         return HE_anchor, HE_compare, np.reshape(sim_score, [-1, 1])
 
 
+class Dset_VG_Pairwise_AUX(Dataset):
+    def __init__(self, cfg, sg, label, label_ids, vocab_glove, vocab2idx, mode):
+        self.cfg = cfg
+        self.max_num_he = cfg['MODEL']['NUM_MAX_HE']
+        self.word_emb_size = cfg['MODEL']['WORD_EMB_SIZE']
+        self.sampling_steps = cfg['MODEL']['STEP']
+
+        self.sg = sg
+        self.sg_keys = list(self.sg.keys())
+        self.label = label
+        self.vg_id_list = label_ids
+        self.label_id2idx = {str(val): i for i, val in enumerate(label_ids)}
+
+        self.label_id2idx_split = [self.label_id2idx[id] for id in self.sg_keys]
+        self.tail_range = cfg['MODEL']['TAIL_RANGE']
+        self.num_sample_per_range = cfg['MODEL']['NUM_SAMPLE_PER_RANGE']
+        self.vocab_glove = vocab_glove
+        self.vocab2idx = vocab2idx
+        self.mode = mode
+
+        self.resnet_dir = '/data/public/rw/datasets/visual_genome/Resnet_feature/wholeImg/'
+
+    def __len__(self):
+        return len(self.sg)
+
+    def __getitem__(self, idx):
+        vg_img_id = self.sg_keys[idx]
+        sg_anchor = self.sg[vg_img_id]
+
+        score = self.label[self.label_id2idx[vg_img_id]][self.label_id2idx_split]
+        sorted_idx = np.argsort(score)[::-1]
+
+        compare_img_idx = upsampling(sorted_idx, self.tail_range, self.num_sample_per_range)
+        #compare_img_idx = [pos_vg_idx.item(), neutral_vg_idx.item(), neg_vg_idx.item()]
+        #compare_img = np.random.randint(len(self.sg), size=1)
+
+        compare_img_id = [ self.sg_keys[i] for i in compare_img_idx]
+        sim_score = [ get_sim(vg_img_id, i, self.label, self.label_id2idx) for i in compare_img_id]
+        sg_compare = np.array([ self.sg[i] for i in compare_img_id ])
+
+        word_vec_anchor = get_word_vec(sg_anchor, self.vocab2idx, self.vocab_glove)
+        word_vec_compare = [ get_word_vec(i, self.vocab2idx, self.vocab_glove) for i in sg_compare]
+
+        aux_anchor = self.get_resnet_feature([vg_img_id])
+        aux_anchor = np.tile(aux_anchor, (len(compare_img_id), 1))
+        aux_compare = self.get_resnet_feature(compare_img_id)
+
+        HE_anchor = np.array(
+                    [he_sampling(sg_anchor['adj'], word_vec_anchor, self.sampling_steps, self.max_num_he, 'train')
+                                   for i in range(len(compare_img_idx)) ]
+                    )
+        HE_compare = np.array(
+                    [he_sampling(sg_compare[i]['adj'], word_vec_compare[i],self.sampling_steps, self.max_num_he, 'train')
+                                    for i in range(len(compare_img_idx)) ]
+                    )
+
+        return HE_anchor, HE_compare, np.reshape(sim_score, [-1, 1]), aux_anchor, aux_compare
+
+    def get_resnet_feature(self, l_img_id):
+        return np.array([np.load(os.path.join(self.resnet_dir, f'{img_id}.npy')) for img_id in l_img_id])
+
+
+
 class Dset_VG_inference(Dataset):
     def __init__(self, cfg, sg, label, label_ids, vocab_glove, vocab2idx):
         self.cfg = cfg
@@ -157,6 +221,40 @@ class Dset_VG_inference(Dataset):
 
         return HE_compare, vg_img_id
 
+
+class Dset_VG_inference_AUX(Dataset):
+    def __init__(self, cfg, sg, label, label_ids, vocab_glove, vocab2idx):
+        self.cfg = cfg
+        self.max_num_he = cfg['MODEL']['NUM_MAX_HE']
+        self.word_emb_size = cfg['MODEL']['WORD_EMB_SIZE']
+        self.sampling_steps = cfg['MODEL']['STEP']
+
+        self.sg = sg
+        self.sg_keys = list(self.sg.keys())
+        self.label = label
+        self.label_id2idx = {str(val): i for i, val in enumerate(label_ids)}
+
+        self.vocab_glove = vocab_glove
+        self.vocab2idx = vocab2idx
+
+        self.resnet_dir = '/data/public/rw/datasets/visual_genome/Resnet_feature/wholeImg/'
+
+    def __len__(self):
+        return len(self.sg)
+
+    def __getitem__(self, idx):
+        vg_img_id = self.sg_keys[idx]
+        sg_compare = self.sg[vg_img_id]
+
+        word_vec_compare = get_word_vec(sg_compare, self.vocab2idx, self.vocab_glove)
+
+        HE_compare, HEs = he_sampling(sg_compare['adj'], word_vec_compare, self.sampling_steps, self.max_num_he, 'infer')
+        aux_compare = self.get_resnet_feature([vg_img_id])[0]
+
+        return HE_compare, vg_img_id, aux_compare
+
+    def get_resnet_feature(self, l_img_id):
+        return np.array([np.load(os.path.join(self.resnet_dir, f'{img_id}.npy')) for img_id in l_img_id])
 
 #for triplet loss
 class Dset_VG(Dataset):

@@ -42,6 +42,7 @@ class HGAN(nn.Module):
         num_he_anchor = he_anchor.shape[1]
         num_he_compare = he_compare.shape[1]
 
+
         he_anchor = self.a2h(he_anchor)
         he_compare = self.c2h(he_compare)
 
@@ -98,3 +99,35 @@ class HGAN(nn.Module):
             loss = self.loss(score_p, score_n)
 
             return score_p, score_n, loss
+
+
+class HGAN_AUX(HGAN):
+    """use auxiliary feature"""
+    def __init__(self, cfg):
+        super(HGAN_AUX, self).__init__(cfg)
+
+        self.n_aux = cfg['MODEL']['NUM_AUX']
+        # self.aux2h = torch.nn.Linear(self.n_aux, self.nhidden)
+        self.aux2emb = torch.nn.Linear(self.n_aux, self.word_emb_size)
+
+    def score(self, he_anchor, he_compare, aux_anchor, aux_compare):
+        aux_emb_anchor = self.aux2emb(aux_anchor).unsqueeze(1)
+        aux_emb_compare = self.aux2emb(aux_compare).unsqueeze(1)
+        cat_anchor = torch.cat([he_anchor, aux_emb_anchor], dim=1)
+        cat_compare = torch.cat([he_compare, aux_emb_compare], dim=1)
+        return super(HGAN_AUX, self).score(cat_anchor, cat_compare)
+
+    def forward(self, he_anchor, he_pos, he_neg, aux_anchor=None, aux_pos=None, aux_neg=None, mode='train'):
+
+        if self.cfg['MODEL']['TARGET'] == 'SBERT':
+            # he_neg is SBERT score
+            score_bert = torch.reshape(he_neg, (-1, 1))
+            score_p, att_map = self.score(he_anchor, he_pos, aux_anchor, aux_pos)
+            loss = self.loss(score_p, score_bert)
+            if mode=='train':
+                return score_p, loss
+            else:
+                return score_p, loss, att_map
+
+        else:
+            raise NotImplementedError
