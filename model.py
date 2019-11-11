@@ -102,7 +102,7 @@ class HGAN(nn.Module):
 
 
 class HGAN_AUX(HGAN):
-    """use auxiliary feature"""
+    """use an auxiliary feature vector (primarily resnet feature) as an additional hyperedge"""
     def __init__(self, cfg):
         super(HGAN_AUX, self).__init__(cfg)
 
@@ -110,11 +110,19 @@ class HGAN_AUX(HGAN):
         # self.aux2h = torch.nn.Linear(self.n_aux, self.nhidden)
         self.aux2emb = torch.nn.Linear(self.n_aux, self.word_emb_size)
 
+        self.onlyres = cfg['MODEL'].get('ONLYRES', False)  # using only resnet feature
+        if self.onlyres:
+            print('using only resnet features')
+
     def score(self, he_anchor, he_compare, aux_anchor, aux_compare):
         aux_emb_anchor = self.aux2emb(aux_anchor).unsqueeze(1)
         aux_emb_compare = self.aux2emb(aux_compare).unsqueeze(1)
-        cat_anchor = torch.cat([he_anchor, aux_emb_anchor], dim=1)
-        cat_compare = torch.cat([he_compare, aux_emb_compare], dim=1)
+        if self.onlyres:
+            cat_anchor = torch.cat([aux_emb_anchor], dim=1)
+            cat_compare = torch.cat([aux_emb_compare], dim=1)
+        else:
+            cat_anchor = torch.cat([he_anchor, aux_emb_anchor], dim=1)
+            cat_compare = torch.cat([he_compare, aux_emb_compare], dim=1)
         return super(HGAN_AUX, self).score(cat_anchor, cat_compare)
 
     def forward(self, he_anchor, he_pos, he_neg, aux_anchor=None, aux_pos=None, aux_neg=None, mode='train'):
@@ -131,3 +139,38 @@ class HGAN_AUX(HGAN):
 
         else:
             raise NotImplementedError
+
+
+class HGAN_LATE_V1(HGAN):
+    """late fusion between auxiliary feature
+    v1: HGAN predicts the difference between cosine similarity"""
+    def __init__(self, cfg):
+        super(HGAN_LATE_V1, self).__init__(cfg)
+
+    def score(self, he_anchor, he_compare, aux_anchor, aux_compare):
+        aux_anchor_norm = torch.norm(aux_anchor, dim=1)
+        aux_compare_norm = torch.norm(aux_compare, dim=1)
+        aux_cosine_sim = (aux_anchor * aux_compare).sum(dim=1)  / aux_anchor_norm / aux_compare_norm
+        aux_cosine_sim += 1  # make it positive, following S-BERT score
+        aux_cosine_sim = aux_cosine_sim.unsqueeze(1)
+
+        he_score, he_att_map = super(HGAN_LATE_V1, self).score(he_anchor, he_compare)
+        return aux_cosine_sim + he_score, he_att_map
+
+    def forward(self, he_anchor, he_pos, he_neg, aux_anchor=None, aux_pos=None, aux_neg=None, mode='train'):
+
+        if self.cfg['MODEL']['TARGET'] == 'SBERT':
+            # he_neg is SBERT score
+            score_bert = torch.reshape(he_neg, (-1, 1))
+            score_p, att_map = self.score(he_anchor, he_pos, aux_anchor, aux_pos)
+            loss = self.loss(score_p, score_bert)
+            if mode=='train':
+                return score_p, loss
+            else:
+                return score_p, loss, att_map
+
+        else:
+            raise NotImplementedError
+
+
+

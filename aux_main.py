@@ -6,7 +6,7 @@ import torch.optim as optim
 from preprocess.utils import load_files, save_json
 from dataloader import Dset_VG, Dset_VG_inference, Dset_VG_inference_AUX, Dset_VG_Pairwise, Dset_VG_Pairwise_AUX, get_word_vec, get_sim, he_sampling
 from torch.utils.data import DataLoader
-from model import HGAN, HGAN_AUX
+from model import HGAN, HGAN_AUX, HGAN_LATE_V1
 import time
 from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
@@ -80,7 +80,7 @@ def prop_mini_batch_sbert(mini_batch, model):
     return score_p, loss
 
 
-def prop_mini_batch_sbert_aux(mini_batch, model):
+def prop_mini_batch_sbert_aux(mini_batch, model, resnet_weight=None):
     HE_a, HE_p, sbert_score, aux_anchor, aux_compare = mini_batch
     HE_a = HE_a.cuda()
     if len(HE_a.shape) == 4:
@@ -97,13 +97,18 @@ def prop_mini_batch_sbert_aux(mini_batch, model):
         num_samples = aux_anchor.shape[1]
         aux_anchor = aux_anchor.reshape(num_batch * num_samples, -1).cuda()
         aux_compare = aux_compare.reshape(num_batch * num_samples, -1).cuda()
+        if resnet_weight is not None:
+            dot = (aux_anchor * aux_compare).sum(dim=1)
+            norm_anchor = aux_anchor.norm(dim=1)
+            norm_compare = aux_compare.norm(dim=1)
+            cosine = dot / norm_anchor / norm_compare + 1  # set similar scale to 0 ~ 2
+            cosine = cosine.reshape(num_batch * num_samples, -1)
+            sbert_score = sbert_score * (1 - resnet_weight) + cosine * (resnet_weight)
     else:
         HE_p = HE_p.cuda()
         sbert_score = sbert_score.cuda()
         raise NotImplementedError
 
-
-    # from pudb import set_trace; set_trace()
     score_p, loss = model(HE_a, HE_p, sbert_score, aux_anchor, aux_compare)
 
     return score_p, loss
@@ -148,7 +153,7 @@ def inference(model, sg_test, infer_dset, infer_dloader, args):
     if not os.path.exists(result_viewer_path):
         os.makedirs(result_viewer_path)
 
-    path_test_img_id_1000 = '/data/project/rw/CBIR/test_id_1000.json'
+    path_test_img_id_1000 = '/data/project/rw/CBIR/test_id_1000_v2.json'
     test_img_id_1000 = load_files(path_test_img_id_1000)
 
     while True:
@@ -196,11 +201,14 @@ def inference_rerank(model, sg_test, infer_dset, args, model_cfg, label_similari
         print("Error!, No saved models!")
         return -1
 
-    num = []
-    for ckpt in ckpts:
-        tokens = ckpt.split('.')
-        num.append(int(tokens[-3].split('_')[-1]))
+    if args.epoch is None:
+        num = []
+        for ckpt in ckpts:
+            tokens = ckpt.split('.')
+            num.append(int(tokens[-3].split('_')[-1]))
 
+    else:
+        num = [args.epoch]
     num.sort()
     last_ckpt = os.path.join(ckpt_path, 'ckpt_' + str(num[-1]) + '.pth.tar')
     print("Load the last model, epoch: %d" % (num[-1]))
@@ -215,17 +223,18 @@ def inference_rerank(model, sg_test, infer_dset, args, model_cfg, label_similari
     if not os.path.exists(result_viewer_path):
         os.makedirs(result_viewer_path)
 
-    path_test_img_id_1000 = '/data/project/rw/CBIR/test_id_1000.json'
+    path_test_img_id_1000 = '/data/project/rw/CBIR/test_id_1000_v3.json'
     test_img_id_1000 = load_files(path_test_img_id_1000)
 
     while True:
         vids = input("visual genome image id, comma separated : ")
-        if int(vids) == -1:
-            break
-        elif int(vids) == 100:
-            vids = test_img_id_1000[:100]
-        elif int(vids) == 1000:
-            vids = test_img_id_1000
+        if vids.isnumeric():
+            if int(vids) == -1:
+                break
+            elif int(vids) == 100:
+                vids = test_img_id_1000[:100]
+            elif int(vids) == 1000:
+                vids = test_img_id_1000
         else:
             vids = vids.strip().split(',')
 
@@ -292,19 +301,22 @@ def inference_rerank_AUX(model, sg_test, infer_dset, args, model_cfg, label_simi
     if not os.path.exists(result_viewer_path):
         os.makedirs(result_viewer_path)
 
-    path_test_img_id_1000 = '/data/project/rw/CBIR/test_id_1000.json'
+    path_test_img_id_1000 = '/data/project/rw/CBIR/test_id_1000_v3.json'
     test_img_id_1000 = load_files(path_test_img_id_1000)
 
     while True:
-        vids = input("visual genome image id, comma separated : ")
-        if int(vids) == -1:
-            break
-        elif int(vids) == 100:
-            vids = test_img_id_1000[:100]
-        elif int(vids) == 1000:
-            vids = test_img_id_1000
+        if args.interactive:
+            vids = input("visual genome image id, comma separated : ")
+            if int(vids) == -1:
+                break
+            elif int(vids) == 100:
+                vids = test_img_id_1000[:100]
+            elif int(vids) == 1000:
+                vids = test_img_id_1000
+            else:
+                vids = vids.strip().split(',')
         else:
-            vids = vids.strip().split(',')
+            vids = test_img_id_1000
 
         for vid in tqdm(vids):
             vg_id_infer = str(vid.strip())
@@ -323,7 +335,7 @@ def inference_rerank_AUX(model, sg_test, infer_dset, args, model_cfg, label_simi
 
             rerank_infer_dset = Dset_VG_inference_AUX(model_cfg, sg_ranked, label_similarity, label_vg_ids,
                                                   infer_dset.vocab_glove, infer_dset.vocab2idx)
-            infer_dloader = DataLoader(rerank_infer_dset, batch_size=10, num_workers=10, shuffle=False)
+            infer_dloader = DataLoader(rerank_infer_dset, batch_size=10, num_workers=32, shuffle=False)
 
 
             infer_result = {}
@@ -344,6 +356,86 @@ def inference_rerank_AUX(model, sg_test, infer_dset, args, model_cfg, label_simi
                 data_pandas = pd.DataFrame.from_dict(infer_result, orient='index')
                 data_pandas.to_csv(result_viewer_path+'/{}.tsv'.format(vid), sep='\t', header=False)#, index=False)
                 save_json(infer_result, result_path + '/infer_result_w_att_epoch_{}_vid_{}.json'.format(num[-1], vid))
+
+        if not args.interactive:
+            break
+
+
+def inference_AUX(model, sg_test, infer_dset, infer_dloader, args, model_cfg, label_similarity, label_vg_ids):
+    ckpt_path = args.ckpt_path + args.exp_name
+    ckpts = glob(os.path.join(ckpt_path, 'ckpt_*.pth.tar'))
+
+    if len(ckpts) == 0:
+        print("Error!, No saved models!")
+        return -1
+
+    num = []
+    for ckpt in ckpts:
+        tokens = ckpt.split('.')
+        num.append(int(tokens[-3].split('_')[-1]))
+
+    num.sort()
+    last_ckpt = os.path.join(ckpt_path, 'ckpt_' + str(num[-1]) + '.pth.tar')
+    print("Load the last model, epoch: %d" % (num[-1]))
+
+    checkpoint = torch.load(last_ckpt)
+    model.load_state_dict(checkpoint['state_dict'])
+    print("loaded checkpoint '{}' (epoch {})".format(ckpts[-1], checkpoint['idx_epoch']))
+
+    result_path = args.result_path + args.exp_name
+
+    result_viewer_path = '/data/project/rw/viewer_CBIR/viewer/results/{}_epoch_{}'.format(args.exp_name, num[-1])
+    if not os.path.exists(result_viewer_path):
+        os.makedirs(result_viewer_path)
+
+    path_test_img_id_1000 = '/data/project/rw/CBIR/test_id_1000_v3.json'
+    test_img_id_1000 = load_files(path_test_img_id_1000)
+
+    while True:
+        if args.interactive:
+            vids = input("visual genome image id, comma separated : ")
+            if int(vids) == -1:
+                break
+            elif int(vids) == 100:
+                vids = test_img_id_1000[:100]
+            elif int(vids) == 1000:
+                vids = test_img_id_1000
+            else:
+                vids = vids.strip().split(',')
+        else:
+            vids = test_img_id_1000
+
+        for vid in tqdm(vids):
+            vg_id_infer = str(vid.strip())
+            infer_sg = sg_test[vg_id_infer]
+            word_vec_anchor = get_word_vec(infer_sg, infer_dset.vocab2idx, infer_dset.vocab_glove)
+            HE_anchor, HEs_anchor = he_sampling(infer_sg['adj'], word_vec_anchor, infer_dset.sampling_steps, infer_dset.max_num_he, 'infer')
+            resnet_dir = '/data/public/rw/datasets/visual_genome/Resnet_feature/wholeImg/'
+            aux_anchor = np.load(os.path.join(resnet_dir, f'{vid}.npy'))
+            HE_anchor = torch.tensor(HE_anchor).cuda()
+            aux_anchor = torch.tensor(aux_anchor).cuda()
+
+            infer_result = {}
+            for b_idx, mini_batch in enumerate((infer_dloader)):
+                # HE_compare, vg_id_compare = mini_batch
+                score, att_map = prop_mini_batch_infer_aux(mini_batch, vid, HE_anchor, aux_anchor, infer_dset.label, infer_dset.label_id2idx, model)
+
+                if args.visualize_att:
+                    for idx_m in range(len(mini_batch[1])):
+                        infer_result[mini_batch[1][idx_m]] = {"score": score[idx_m].item(), "att": att_map[idx_m].item()}
+                else:
+                    score_arr = [s.item() for s in score]
+                    infer_result.update(list(zip(mini_batch[1], score_arr)))
+
+            if args.visualize_att:
+                save_json(infer_result, result_path + '/infer_result_w_att_epoch_{}_vid_{}.json'.format(num[-1], vid))
+            else:
+                data_pandas = pd.DataFrame.from_dict(infer_result, orient='index')
+                data_pandas.to_csv(result_viewer_path+'/{}.tsv'.format(vid), sep='\t', header=False)#, index=False)
+                save_json(infer_result, result_path + '/infer_result_w_att_epoch_{}_vid_{}.json'.format(num[-1], vid))
+
+        if not args.interactive:
+            break
 
 
 
@@ -375,6 +467,8 @@ def main():
     parser.add_argument("--result_path", type=str, default='/data/project/rw/woong.ssang/CBIR/results/')
     parser.add_argument("--ckpt_path", type=str, default='/data/project/rw/woong.ssang/CBIR/ckpt/')
     parser.add_argument("--rerank", action='store_true')
+    parser.add_argument("--interactive", action='store_true')
+    parser.add_argument("--epoch", type=int, default=None)
     args = parser.parse_args()
 
     model_cfg = load_files(args.config_file)
@@ -425,20 +519,32 @@ def main():
     infer_dloader = DataLoader(infer_dset, batch_size=model_cfg['MODEL']['BATCH_SIZE'], num_workers=args.num_workers, shuffle=False)
 
     # ------------ Model -----------------------
-    model = HGAN_AUX(model_cfg)
+    model_from_yaml = model_cfg['MODEL'].get('MODEL', None)
+    if model_from_yaml == 'HGAN_LATE_V1':
+        model = HGAN_LATE_V1(model_cfg)
+    elif model_from_yaml == 'HAN_AUX':
+        model = HGAN_AUX(model_cfg)
+    else:
+        model = HGAN(model_cfg)
 
     optimizer = optim.Adam(model.parameters(), lr=model_cfg['MODEL']['LR'])
     lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.9)
     # lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[7, 15], gamma=0.5)
 
     model.cuda()
+    resnet_weight = model_cfg['MODEL'].get('RESNET_WEIGHT', None)
 
     if args.inference == True:
         if args.rerank:
-            # inference_rerank(model, sg_test, infer_dset, args, model_cfg, label_similarity, label_vg_ids)
-            inference_rerank_AUX(model, sg_test, infer_dset, args, model_cfg, label_similarity, label_vg_ids)
+            if model_from_yaml: 
+                inference_rerank_AUX(model, sg_test, infer_dset, args, model_cfg, label_similarity, label_vg_ids)
+            else:
+                inference_rerank(model, sg_test, infer_dset, args, model_cfg, label_similarity, label_vg_ids)
         else:
-            inference(model, sg_test, infer_dset, infer_dloader, args, model_cfg, label_similarity, label_vg_ids)
+            if model_from_yaml:
+                inference(model, sg_test, infer_dset, infer_dloader, args, model_cfg, label_similarity, label_vg_ids)
+            else:
+                inference_AUX(model, sg_test, infer_dset, infer_dloader, args, model_cfg, label_similarity, label_vg_ids)
 
         return 0
     # ------------ Iteration -----------------------
@@ -453,7 +559,7 @@ def main():
 
         for b_idx, mini_batch in enumerate(tqdm(train_dloader)):
             if model_cfg['MODEL']['TARGET'] == 'SBERT':
-                score_p, loss = prop_mini_batch_sbert_aux(mini_batch, model)
+                score_p, loss = prop_mini_batch_sbert_aux(mini_batch, model, resnet_weight=resnet_weight)
             else:
                 score_p, score_n, loss = prop_mini_batch(mini_batch, model)
 
@@ -485,7 +591,7 @@ def main():
 
         for b_idx, mini_batch in enumerate(tqdm(test_dloader)):
             if model_cfg['MODEL']['TARGET'] == 'SBERT':
-                score_p, loss = prop_mini_batch_sbert_aux(mini_batch, model)
+                score_p, loss = prop_mini_batch_sbert_aux(mini_batch, model, resnet_weight=resnet_weight)
             else:
                 score_p, score_n, loss = prop_mini_batch(mini_batch, model)
 
