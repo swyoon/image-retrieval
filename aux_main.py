@@ -536,15 +536,15 @@ def main():
 
     if args.inference == True:
         if args.rerank:
-            if model_from_yaml: 
+            if model_from_yaml is not None: 
                 inference_rerank_AUX(model, sg_test, infer_dset, args, model_cfg, label_similarity, label_vg_ids)
             else:
                 inference_rerank(model, sg_test, infer_dset, args, model_cfg, label_similarity, label_vg_ids)
         else:
-            if model_from_yaml:
-                inference(model, sg_test, infer_dset, infer_dloader, args, model_cfg, label_similarity, label_vg_ids)
-            else:
+            if model_from_yaml is not None:
                 inference_AUX(model, sg_test, infer_dset, infer_dloader, args, model_cfg, label_similarity, label_vg_ids)
+            else:
+                inference(model, sg_test, infer_dset, infer_dloader, args, model_cfg, label_similarity, label_vg_ids)
 
         return 0
     # ------------ Iteration -----------------------
