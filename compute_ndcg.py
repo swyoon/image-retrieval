@@ -23,6 +23,7 @@ parser.add_argument('model_name', type=str, help='The name of directory to be se
 parser.add_argument('--resultdir', type=str, default='/data/project/rw/viewer_CBIR/viewer/results/')
 parser.add_argument('--query', type=str, default='all', help='list of query ids. comma separated.')
 parser.add_argument('--zero-baseline', action='store_true')
+parser.add_argument('--resnet', type=float, default=None, help='portion of resnet similarity in relevance')
 args = parser.parse_args()
 
 pred_sim_dir = os.path.join(args.resultdir, args.model_name)
@@ -44,6 +45,17 @@ print(f'running for {len(l_query_id)} queries')
 
 if args.zero_baseline:
     print('adjust the smallest similarity score to zero')
+    if args.resnet:
+        print('using minimum score for resnet weight 0.8')
+        min_score = 1.102
+    else:
+        min_score = 0.59
+    print(f'min_score {min_score} ')
+
+    # min_sbert_score = 0.59
+    # min_resnet_score = 1.124
+    # print(f'min_sbert_score {min_sbert_score} ')
+    # print(f'min_resnet_score {min_resnet_score} ')
 else:
     print('Using raw similarity score')
 
@@ -178,13 +190,19 @@ class BERTSimilarityInMem:
 
 
 """load true similarity files"""
-# f_sbert = h5py.File("/data/public/rw/datasets/visual_genome/BERT_feature/SBERT_sims.hdf5", "r")
-f_sbert = h5py.File("/data/public/rw/datasets/visual_genome/BERT_feature/SBERT_sims_float16.hdf5", "r")
-# f_sbert_gen = h5py.File("/data/public/rw/datasets/visual_genome/BERT_feature/SBERT_gen_sims_new.hdf5", "r")
-# f_resnet = h5py.File("/data/public/rw/datasets/visual_genome/Resnet_feature/resnet_coco_cosine_top100.hdf5", "r")
+# f_sbert = h5py.File("/data/public/rw/datasets/visual_genome/BERT_feature/SBERT_sims_float16.hdf5", "r")
+f_sbert = h5py.File("/data/public/rw/datasets/visual_genome/BERT_feature/SBERT_sims.hdf5", "r")
 ids = f_sbert['id'][:]
 id2idx = {str(img_id): idx for idx, img_id in enumerate(ids)}  
 sbert_sim = BERTSimilarityInMem('/data/public/rw/datasets/visual_genome/BERT_feature/SBERT_sims_float16.hdf5')
+# sbert_sim = BERTSimilarityInMem('/data/public/rw/datasets/visual_genome/BERT_feature/SBERT_sims.hdf5')
+if args.resnet is not None:
+    print('loading RESNET similarity score...')
+    print(f'resnet similarity mixing ratio: {args.resnet}')
+    resnet_sim = BERTSimilarityInMem('/data/public/rw/datasets/visual_genome/BERT_feature/RESNET_sims_float16.hdf5')
+    # resnet_sim = BERTSimilarityInMem('/data/public/rw/datasets/visual_genome/BERT_feature/RESNET_sims.hdf5')
+else:
+    resnet_sim = None
 
 """load train/test split"""
 l_train_id, l_test_id = get_train_test_split()
@@ -197,31 +215,30 @@ for query_id in tqdm(l_query_id):
     query_sim_file = os.path.join(pred_sim_dir, query_id + '.tsv')
     df_pred_sim = pd.read_csv(query_sim_file, header=None, sep='\t')
     time_2 = time.time()
-    # print(f'1 {time_2 - time_1}')
 
-    # l_candidate_idx = np.array([id2idx[str(img_id)] for img_id in df_pred_sim[0]])
-
-    df_pred_sim = df_pred_sim.drop(index=df_pred_sim.index[df_pred_sim[0]==int(query_id)])
+    df_pred_sim = df_pred_sim.drop(index=df_pred_sim.index[df_pred_sim[0]==int(query_id)])  # drop self
     l_candidate_id = list(df_pred_sim[0])
-    # l_candidate_id = [id_ for id_ in list(df_pred_sim[0]) if str(id_) != query_id]  # remove self
 
     time_3 = time.time()
-    # print(f'2 {time_3 - time_2}')
-    # sanity check
-    # true_sim = torch.tensor([f_sbert[f'/sims/{query_id}'][img_idx] for img_idx in l_candidate_idx]).view(1, -1)
-    true_sim = torch.tensor([sbert_sim.get_similarity(query_id, img_id) for img_id in l_candidate_id]).view(1, -1).to(dtype=torch.float)
+    if args.resnet is None:
+        true_sim = torch.tensor([sbert_sim.get_similarity(query_id, img_id) for img_id in l_candidate_id]).view(1, -1).to(dtype=torch.float)
+    else:
+        sbert_score = torch.tensor([sbert_sim.get_similarity(query_id, img_id) for img_id in l_candidate_id]).view(1, -1).to(dtype=torch.float)
+        resnet_score = torch.tensor([resnet_sim.get_similarity(query_id, img_id) for img_id in l_candidate_id]).view(1, -1).to(dtype=torch.float)
+        true_sim = (1 - args.resnet) * sbert_score + args.resnet * resnet_score
 
     if args.zero_baseline:
-        true_sim -= 0.59
+        true_sim -= min_score
     pred_sim = torch.tensor(df_pred_sim[1].values).view(1, -1)
 
+    # from pudb import set_trace; set_trace()
+
     time_4 = time.time()
-    # print(f'3 {time_4 - time_3}')
     d_ndcg = ndcg_batch(pred_sim, true_sim, ks=ks)
+    # d_ndcg = ndcg_batch(-true_sim, true_sim, ks=ks)
     for k in ks:
         d_result[k].append(d_ndcg[k])
     time_5 = time.time()
-    # print(f'4 {time_5 - time_4}')
 
 
 

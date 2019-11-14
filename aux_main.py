@@ -438,6 +438,126 @@ def inference_AUX(model, sg_test, infer_dset, infer_dloader, args, model_cfg, la
             break
 
 
+def split_id(l, split_idx, n_split):
+    split_size = int(len(l) / n_split)
+    if split_idx == n_split - 1:
+        end = len(l)
+    else:
+        end = (split_idx + 1) * split_size
+    start = split_idx * split_size
+    print(start, end)
+    return l[start:end]
+
+
+def inference_v2(model, sg_test, infer_dset, infer_dloader, args, model_cfg, label_similarity, label_vg_ids):
+    ckpt_path = args.ckpt_path + args.exp_name
+    ckpts = glob(os.path.join(ckpt_path, 'ckpt_*.pth.tar'))
+
+    if len(ckpts) == 0:
+        print("Error!, No saved models!")
+        return -1
+
+    if args.epoch is None:
+        num = []
+        for ckpt in ckpts:
+            tokens = ckpt.split('.')
+            num.append(int(tokens[-3].split('_')[-1]))
+
+    else:
+        num = [args.epoch]
+
+    num.sort()
+    last_ckpt = os.path.join(ckpt_path, 'ckpt_' + str(num[-1]) + '.pth.tar')
+    print("Load the last model, epoch: %d" % (num[-1]))
+
+    checkpoint = torch.load(last_ckpt)
+    model.load_state_dict(checkpoint['state_dict'])
+    print("loaded checkpoint '{}' (epoch {})".format(ckpts[-1], checkpoint['idx_epoch']))
+
+    result_path = args.result_path + args.exp_name
+
+    result_viewer_path = '/data/project/rw/viewer_CBIR/viewer/results/{}_epoch_{}'.format(args.exp_name, num[-1])
+    if not os.path.exists(result_viewer_path):
+        os.makedirs(result_viewer_path)
+
+    path_test_img_id_1000 = '/data/project/rw/CBIR/test_id_1000_v3.json'
+    test_img_id_1000 = load_files(path_test_img_id_1000)
+
+    if model_cfg['MODEL'].get('MODEL', 'HAN') != 'HAN':
+        use_aux_input = True
+    else:
+        use_aux_input = False
+
+    while True:
+
+        if args.interactive:
+            vids = input("visual genome image id, comma separated : ")
+            if vids.isnumeric():
+                if int(vids) == -1:
+                    break
+                elif int(vids) == 100:
+                    vids = test_img_id_1000[:100]
+                elif int(vids) == 1000:
+                    vids = test_img_id_1000
+            else:
+                vids = vids.strip().split(',')
+        else:
+            if args.split_idx is not None:
+                vids = split_id(test_img_id_1000, args.split_idx, args.n_split)
+                print(f'running for {args.split_idx}/{args.n_split}. Total {len(vids)} images. ')
+            else:
+                vids = test_img_id_1000
+
+        for vid in tqdm(vids):
+            vg_id_infer = str(vid.strip())
+            infer_sg = sg_test[vg_id_infer]
+            word_vec_anchor = get_word_vec(infer_sg, infer_dset.vocab2idx, infer_dset.vocab_glove)
+            HE_anchor, HEs_anchor = he_sampling(infer_sg['adj'], word_vec_anchor, infer_dset.sampling_steps, infer_dset.max_num_he, 'infer')
+            resnet_dir = '/data/public/rw/datasets/visual_genome/Resnet_feature/wholeImg/'
+            HE_anchor = torch.tensor(HE_anchor).cuda()
+            if use_aux_input:
+                aux_anchor = np.load(os.path.join(resnet_dir, f'{vid}.npy'))
+                aux_anchor = torch.tensor(aux_anchor).cuda()
+
+            if args.rerank:  # RESNET RERANKING
+                l_target_id = get_resnet_rank(vid)
+                target_ids = set(l_target_id)
+                sg_ranked = {k: v for k, v in sg_test.items() if k in target_ids}
+
+                if use_aux_input:
+                    rerank_infer_dset = Dset_VG_inference_AUX(model_cfg, sg_ranked, label_similarity, label_vg_ids,
+                                                          infer_dset.vocab_glove, infer_dset.vocab2idx)
+                else:
+                    rerank_infer_dset = Dset_VG_inference(model_cfg, sg_ranked, label_similarity, label_vg_ids,
+                                                          infer_dset.vocab_glove, infer_dset.vocab2idx)
+                infer_dloader = DataLoader(rerank_infer_dset, batch_size=10, num_workers=32, shuffle=False)
+
+
+            infer_result = {}
+            for b_idx, mini_batch in enumerate((infer_dloader)):
+                # HE_compare, vg_id_compare = mini_batch
+                if use_aux_input:
+                    score, att_map = prop_mini_batch_infer_aux(mini_batch, vid, HE_anchor, aux_anchor, infer_dset.label, infer_dset.label_id2idx, model)
+                else:
+                    score, att_map = prop_mini_batch_infer(mini_batch, vid, HE_anchor, infer_dset.label, infer_dset.label_id2idx, model)
+
+                if args.visualize_att:
+                    for idx_m in range(len(mini_batch[1])):
+                        infer_result[mini_batch[1][idx_m]] = {"score": score[idx_m].item(), "att": att_map[idx_m].item()}
+                else:
+                    score_arr = [s.item() for s in score]
+                    infer_result.update(list(zip(mini_batch[1], score_arr)))
+
+            if args.visualize_att:
+                save_json(infer_result, result_path + '/infer_result_w_att_epoch_{}_vid_{}.json'.format(num[-1], vid))
+            else:
+                data_pandas = pd.DataFrame.from_dict(infer_result, orient='index')
+                data_pandas.to_csv(result_viewer_path+'/{}.tsv'.format(vid), sep='\t', header=False)#, index=False)
+                save_json(infer_result, result_path + '/infer_result_w_att_epoch_{}_vid_{}.json'.format(num[-1], vid))
+
+        if not args.interactive:
+            break
+
 
 def get_resnet_rank(query_id, n_rank=100):
     resnet_result_path = '/data/project/rw/viewer_CBIR/viewer/results/test_resnet_cosine/'
@@ -469,6 +589,8 @@ def main():
     parser.add_argument("--rerank", action='store_true')
     parser.add_argument("--interactive", action='store_true')
     parser.add_argument("--epoch", type=int, default=None)
+    parser.add_argument("--split_idx", type=int, default=None)
+    parser.add_argument("--n_split", type=int, default=None)
     args = parser.parse_args()
 
     model_cfg = load_files(args.config_file)
@@ -519,7 +641,7 @@ def main():
     infer_dloader = DataLoader(infer_dset, batch_size=model_cfg['MODEL']['BATCH_SIZE'], num_workers=args.num_workers, shuffle=False)
 
     # ------------ Model -----------------------
-    model_from_yaml = model_cfg['MODEL'].get('MODEL', None)
+    model_from_yaml = model_cfg['MODEL'].get('MODEL', 'HAN')
     if model_from_yaml == 'HGAN_LATE_V1':
         model = HGAN_LATE_V1(model_cfg)
     elif model_from_yaml == 'HAN_AUX':
@@ -535,16 +657,18 @@ def main():
     resnet_weight = model_cfg['MODEL'].get('RESNET_WEIGHT', None)
 
     if args.inference == True:
-        if args.rerank:
-            if model_from_yaml is not None: 
-                inference_rerank_AUX(model, sg_test, infer_dset, args, model_cfg, label_similarity, label_vg_ids)
-            else:
-                inference_rerank(model, sg_test, infer_dset, args, model_cfg, label_similarity, label_vg_ids)
-        else:
-            if model_from_yaml is not None:
-                inference_AUX(model, sg_test, infer_dset, infer_dloader, args, model_cfg, label_similarity, label_vg_ids)
-            else:
-                inference(model, sg_test, infer_dset, infer_dloader, args, model_cfg, label_similarity, label_vg_ids)
+        inference_v2(model, sg_test, infer_dset, infer_dloader, args, model_cfg, label_similarity, label_vg_ids)
+        # if args.rerank:
+        #     if model_from_yaml is not None: 
+        #         inference_rerank_AUX(model, sg_test, infer_dset, args, model_cfg, label_similarity, label_vg_ids)
+        #     else:
+        #         inference_rerank(model, sg_test, infer_dset, args, model_cfg, label_similarity, label_vg_ids)
+        # else:
+        #     if model_from_yaml is not None:
+        #         inference_AUX(model, sg_test, infer_dset, infer_dloader, args, model_cfg, label_similarity, label_vg_ids)
+        #     else:
+        #         inference(model, sg_test, infer_dset, infer_dloader, args)
+                # inference(model, sg_test, infer_dset, infer_dloader, args, model_cfg, label_similarity, label_vg_ids)
 
         return 0
     # ------------ Iteration -----------------------
