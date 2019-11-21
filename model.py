@@ -81,7 +81,7 @@ class HGAN(nn.Module):
         #score = F.relu(score)
         return score, att_map
 
-    def forward(self, he_anchor, he_pos, he_neg, mode='train'):
+    def forward(self, he_anchor, he_pos, he_neg, mode='train', **kwargs):
         #he_*: B x 100 x dim_word_emb
 
         if self.cfg['MODEL']['TARGET'] == 'SBERT':
@@ -156,6 +156,39 @@ class HGAN_LATE_V1(HGAN):
 
         he_score, he_att_map = super(HGAN_LATE_V1, self).score(he_anchor, he_compare)
         return aux_cosine_sim + he_score, he_att_map
+
+    def forward(self, he_anchor, he_pos, he_neg, aux_anchor=None, aux_pos=None, aux_neg=None, mode='train'):
+
+        if self.cfg['MODEL']['TARGET'] == 'SBERT':
+            # he_neg is SBERT score
+            score_bert = torch.reshape(he_neg, (-1, 1))
+            score_p, att_map = self.score(he_anchor, he_pos, aux_anchor, aux_pos)
+            loss = self.loss(score_p, score_bert)
+            if mode=='train':
+                return score_p, loss
+            else:
+                return score_p, loss, att_map
+
+        else:
+            raise NotImplementedError
+
+
+class HGAN_V2(HGAN):
+    """late fusion between auxiliary feature
+    v1: HGAN predicts the difference between cosine similarity"""
+    def __init__(self, cfg):
+        super(HGAN_V2, self).__init__(cfg)
+        self.resnetweight = cfg['MODEL']['RESNET_WEIGHT']
+
+    def score(self, he_anchor, he_compare, aux_anchor, aux_compare):
+        aux_anchor_norm = torch.norm(aux_anchor, dim=1)
+        aux_compare_norm = torch.norm(aux_compare, dim=1)
+        aux_cosine_sim = (aux_anchor * aux_compare).sum(dim=1)  / aux_anchor_norm / aux_compare_norm
+        aux_cosine_sim += 1  # make it positive, following S-BERT score
+        aux_cosine_sim = aux_cosine_sim.unsqueeze(1)
+
+        he_score, he_att_map = super(HGAN_LATE_V1, self).score(he_anchor, he_compare)
+        return aux_cosine_sim * self.resnetweight + he_score, he_att_map
 
     def forward(self, he_anchor, he_pos, he_neg, aux_anchor=None, aux_pos=None, aux_neg=None, mode='train'):
 

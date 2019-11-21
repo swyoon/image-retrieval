@@ -1,0 +1,24 @@
+DATASET:
+  NAME: "vg"
+  PATH: "/data/project/rw/VG_eskim"
+  SG_TRAIN: "/data/project/rw/CBIR/scene_graph_with_adj_train.pkl"
+  SG_TEST: "/data/project/rw/CBIR/scene_graph_with_adj_test.pkl"
+  VOCAB_GLOVE: "/data/project/rw/CBIR/glove_embs_vg_coco_sg.pkl"
+  VOCAB2IDX: "/data/project/rw/CBIR/vocab2idx_vg_coco_sg.pkl"
+  IDX2VOCAB: "/data/project/rw/CBIR/idx2vocab_vg_coco_sg.pkl"
+  SIM_GT: "/data/public/rw/datasets/visual_genome/BERT_feature/bert_sim.npz"
+
+MODEL:
+  TARGET: SBERT
+  BATCH_SIZE: 32
+  LR: 0.0001
+  NUM_MAX_HE: 100
+  STEP: 3
+  WORD_EMB_SIZE: 300
+  NUM_HIDDEN: 256
+  NUM_HEAD: 8
+  TAIL_RANGE: 100
+  NUM_SAMPLE_PER_RANGE: 2
+  RESNET_WEIGHT: 0.55
+
+

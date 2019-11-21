@@ -46,8 +46,9 @@ print(f'running for {len(l_query_id)} queries')
 if args.zero_baseline:
     print('adjust the smallest similarity score to zero')
     if args.resnet:
-        print('using minimum score for resnet weight 0.8')
-        min_score = 1.102
+        print('using minimum score for resnet weight 0.55')
+        min_score = 0.606
+        # 새로운 sbert score 는 -1에서 1인 것이 반영됨
     else:
         min_score = 0.59
     print(f'min_score {min_score} ')
@@ -175,11 +176,11 @@ def get_train_test_split(split_json='/data/project/rw/CBIR/img_split.json'):
 class BERTSimilarityInMem:
     """class for handling SBERT similarity file from IMLAB
     Identical to BERTSimilarity, but loads all similarity metric in memory"""
-    def __init__(self, file_path):
+    def __init__(self, file_path, key='sims'):
         with h5py.File(file_path, 'r') as f:
             self.idx_lookup = {str(img_id): idx for idx, img_id in enumerate(f['id'])}
             self.sims = {}
-            for k, v in tqdm(f['sims'].items()):
+            for k, v in tqdm(f[key].items()):
                 self.sims[k] = v[:]
             # self.sims = {k: v[:] for k, v in f['sims'].items()}
 
@@ -194,8 +195,8 @@ class BERTSimilarityInMem:
 f_sbert = h5py.File("/data/public/rw/datasets/visual_genome/BERT_feature/SBERT_sims.hdf5", "r")
 ids = f_sbert['id'][:]
 id2idx = {str(img_id): idx for idx, img_id in enumerate(ids)}  
-sbert_sim = BERTSimilarityInMem('/data/public/rw/datasets/visual_genome/BERT_feature/SBERT_sims_float16.hdf5')
-# sbert_sim = BERTSimilarityInMem('/data/public/rw/datasets/visual_genome/BERT_feature/SBERT_sims.hdf5')
+# sbert_sim = BERTSimilarityInMem('/data/public/rw/datasets/visual_genome/BERT_feature/SBERT_sims_float16.hdf5')
+sbert_sim = BERTSimilarityInMem('/data/project/rw/medical_sg/sbert_allcaps_sims_batch.hdf5', key='mean')
 if args.resnet is not None:
     print('loading RESNET similarity score...')
     print(f'resnet similarity mixing ratio: {args.resnet}')
@@ -234,6 +235,7 @@ for query_id in tqdm(l_query_id):
     # from pudb import set_trace; set_trace()
 
     time_4 = time.time()
+    assert torch.all(true_sim >= 0)
     d_ndcg = ndcg_batch(pred_sim, true_sim, ks=ks)
     # d_ndcg = ndcg_batch(-true_sim, true_sim, ks=ks)
     for k in ks:

@@ -6,8 +6,9 @@ import torch.optim as optim
 from preprocess.utils import load_files, save_json
 from dataloader import Dset_VG, Dset_VG_inference, Dset_VG_inference_AUX, Dset_VG_Pairwise, Dset_VG_Pairwise_AUX, get_word_vec, get_sim, he_sampling
 from torch.utils.data import DataLoader
-from model import HGAN, HGAN_AUX, HGAN_LATE_V1
+from model import HGAN, HGAN_AUX, HGAN_LATE_V1, HGAN_V2
 import time
+import json
 from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
 from glob import glob
@@ -109,7 +110,7 @@ def prop_mini_batch_sbert_aux(mini_batch, model, resnet_weight=None):
         sbert_score = sbert_score.cuda()
         raise NotImplementedError
 
-    score_p, loss = model(HE_a, HE_p, sbert_score, aux_anchor, aux_compare)
+    score_p, loss = model(HE_a, HE_p, sbert_score, aux_anchor=aux_anchor, aux_pos=aux_compare)
 
     return score_p, loss
 
@@ -515,31 +516,31 @@ def inference_v2(model, sg_test, infer_dset, infer_dloader, args, model_cfg, lab
             HE_anchor, HEs_anchor = he_sampling(infer_sg['adj'], word_vec_anchor, infer_dset.sampling_steps, infer_dset.max_num_he, 'infer')
             resnet_dir = '/data/public/rw/datasets/visual_genome/Resnet_feature/wholeImg/'
             HE_anchor = torch.tensor(HE_anchor).cuda()
-            if use_aux_input:
-                aux_anchor = np.load(os.path.join(resnet_dir, f'{vid}.npy'))
-                aux_anchor = torch.tensor(aux_anchor).cuda()
+            # if use_aux_input:
+            aux_anchor = np.load(os.path.join(resnet_dir, f'{vid}.npy'))
+            aux_anchor = torch.tensor(aux_anchor).cuda()
 
             if args.rerank:  # RESNET RERANKING
                 l_target_id = get_resnet_rank(vid)
                 target_ids = set(l_target_id)
                 sg_ranked = {k: v for k, v in sg_test.items() if k in target_ids}
 
-                if use_aux_input:
-                    rerank_infer_dset = Dset_VG_inference_AUX(model_cfg, sg_ranked, label_similarity, label_vg_ids,
-                                                          infer_dset.vocab_glove, infer_dset.vocab2idx)
-                else:
-                    rerank_infer_dset = Dset_VG_inference(model_cfg, sg_ranked, label_similarity, label_vg_ids,
-                                                          infer_dset.vocab_glove, infer_dset.vocab2idx)
+                # if use_aux_input:
+                rerank_infer_dset = Dset_VG_inference_AUX(model_cfg, sg_ranked, label_similarity, label_vg_ids,
+                                                      infer_dset.vocab_glove, infer_dset.vocab2idx)
+                # else:
+                #     rerank_infer_dset = Dset_VG_inference(model_cfg, sg_ranked, label_similarity, label_vg_ids,
+                #                                           infer_dset.vocab_glove, infer_dset.vocab2idx)
                 infer_dloader = DataLoader(rerank_infer_dset, batch_size=10, num_workers=32, shuffle=False)
 
 
             infer_result = {}
             for b_idx, mini_batch in enumerate((infer_dloader)):
                 # HE_compare, vg_id_compare = mini_batch
-                if use_aux_input:
-                    score, att_map = prop_mini_batch_infer_aux(mini_batch, vid, HE_anchor, aux_anchor, infer_dset.label, infer_dset.label_id2idx, model)
-                else:
-                    score, att_map = prop_mini_batch_infer(mini_batch, vid, HE_anchor, infer_dset.label, infer_dset.label_id2idx, model)
+                # if use_aux_input:
+                score, att_map = prop_mini_batch_infer_aux(mini_batch, vid, HE_anchor, aux_anchor, infer_dset.label, infer_dset.label_id2idx, model)
+                # else:
+                #     score, att_map = prop_mini_batch_infer(mini_batch, vid, HE_anchor, infer_dset.label, infer_dset.label_id2idx, model)
 
                 if args.visualize_att:
                     for idx_m in range(len(mini_batch[1])):
@@ -625,9 +626,12 @@ def main():
 
     tic = time.time()
     print("loading label data")
-    label_similarity_info = load_files(model_cfg['DATASET']['SIM_GT'])
-    label_vg_ids = label_similarity_info['id']
-    label_similarity = label_similarity_info['sims']
+    # label_similarity_info = load_files(model_cfg['DATASET']['SIM_GT'])
+    # label_vg_ids = label_similarity_info['id']
+    # label_similarity = label_similarity_info['sims']
+    print('using mean S-BERT')
+    label_similarity = np.load('/data/project/rw/CBIR/sbert_sims/allcap_traintest.npz')['means'] + 1  # 0~2
+    label_vg_ids = np.array(json.load(open('/data/project/rw/CBIR/sbert_sims/allcap_traintest_keylist.json', 'r')))
     print("loaded label data {}s".format(time.time()-tic))
 
     # ------------ Construct Dataset Class ------------------------------------
@@ -646,6 +650,8 @@ def main():
         model = HGAN_LATE_V1(model_cfg)
     elif model_from_yaml == 'HAN_AUX':
         model = HGAN_AUX(model_cfg)
+    elif model_from_yaml == 'HAN_V2':
+        model = HGAN_V2(model_cfg)
     else:
         model = HGAN(model_cfg)
 
