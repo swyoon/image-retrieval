@@ -144,7 +144,12 @@ class CocoDataset(data.Dataset):
     def get_img_path(self, img_id):
         coco = self._get_coco_by_imgid(img_id)
         img_filename = coco.loadImgs(ids=[img_id])[0]['file_name']
-        return os.path.join(self.img_dir, img_filename)
+
+        if 'train' in img_filename:
+            dirname = 'train2014'
+        else:
+            dirname = 'val2014'
+        return os.path.join(self.img_dir, dirname, img_filename)
 
     def imgid2capid(self, img_id):
         coco = self._get_coco_by_imgid(img_id)
