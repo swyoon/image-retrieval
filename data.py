@@ -208,16 +208,40 @@ class FlickrDataset(data.Dataset):
     Dataset loader for Flickr30k and Flickr8k full datasets.
     """
 
-    def __init__(self, root, json, split, vocab, transform=None):
+    def __init__(self, root='/data/project/rw/CBIR/data/f30k', 
+                 vocab=None, transform=None):
         self.root = root
+        self.img_dir = os.path.join(root, 'images')
         self.vocab = vocab
-        self.split = split
         self.transform = transform
-        self.dataset = jsonmod.load(open(json, 'r'))['images']
+        json_path = os.path.join(root, 'dataset_flickr30k.json')
+        self.dataset = jsonmod.load(open(json_path, 'r'))['images']
         self.ids = []
-        for i, d in enumerate(self.dataset):
-            if d['split'] == split:
-                self.ids += [(i, x) for x in range(len(d['sentences']))]
+        # for i, d in enumerate(self.dataset):
+        #     if d['split'] == split:
+        #         self.ids += [(i, x) for x in range(len(d['sentences']))]
+
+        self.d_imgid2capid = {t['imgid']: t['sentids'] for t in self.dataset}
+        self.d_imgid2filename = {t['imgid']: t['filename'] for t in self.dataset}
+        self.d_capid2imgid = {s['sentid']: s['imgid'] for t in self.dataset
+                              for s in t['sentences']}
+        self.d_captions = {s['sentid']: s['raw'] for t in self.dataset
+                           for s in t['sentences']}
+        self.d_split = {split: [t['imgid'] for t in self.dataset
+                                if t['split'] == split]
+                        for split in ['train', 'val', 'test']}
+
+    def get_img_path(self, img_id):
+        return os.path.join(self.img_dir, self.d_imgid2filename[img_id])
+
+    def imgid2capid(self, img_id):
+        return self.d_imgid2capid[img_id]
+
+    def capid2imgid(self, cap_id):
+        return self.d_capid2imgid[cap_id]
+
+    def get_caption(self, cap_id):
+        return self.d_captions[cap_id]
 
     def __getitem__(self, index):
         """This function returns a tuple that is further passed to collate_fn
