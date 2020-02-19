@@ -14,10 +14,10 @@ from time import time
 from tqdm import tqdm
 from joblib import Parallel, delayed
 sys.path.append('../')
-from data import BERTSimilarity, get_karpathy_split_light
+from data import BERTSimilarity, get_karpathy_split_light, FlickrDataset
 
 
-DATASET = 'coco'
+DATASET = 'f30k'
 DB_SET = 'test'  # one of ('train', 'test')
 DIST = 'cosine'  # one of ('euclidean', 'cosine')
 print('Preparing similarity scores for CBIR web viewer...')
@@ -25,7 +25,6 @@ print('Running for resnet')
 print(f'Database set: {DB_SET}')
 print(f'Using similarity metric {DIST}')
 
-DATASET = 'coco'  # one of ('train', 'test')
 print('Preparing similarity scores for CBIR web viewer...')
 
 if DATASET == 'coco':
@@ -36,9 +35,12 @@ if DATASET == 'coco':
 
     d_split = get_karpathy_split_light()
     l_test = d_split['test']
+    resnet_feature_file = '/data/project/rw/CBIR/data/coco/resnet152.h5'
+elif DATASET == 'f30k':
+    f30k = FlickrDataset()
+    l_test = f30k.d_split['test']
+    resnet_feature_file = '/data/project/rw/CBIR/data/f30k/resnet152.h5'
 
-
-resnet_feature_file = '/data/project/rw/CBIR/data/coco/resnet152.h5'
 
 f = h5py.File(resnet_feature_file, 'r')
 id2idx = {img_id: int(idx) for idx, img_id in enumerate(f['id'])}

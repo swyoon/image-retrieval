@@ -13,6 +13,7 @@ import json
 import numpy as np
 from time import time
 from tqdm import tqdm
+from data import CocoDataset, FlickrDataset
 
 
 def get_visual_genome_coco_split():
@@ -27,16 +28,18 @@ def get_visual_genome_coco_split():
 
 # setting
 parser = argparse.ArgumentParser()
+parser.add_argument('dataset', type=str, help='dataset name', choices=('coco', 'f30k'))
 parser.add_argument('algorithm', type=str, help='The name of directory to be searched for predicted similarity score')
 args = parser.parse_args()
 
+dataset = args.dataset
 algorithm = args.algorithm
 DB_SET = 'test'
 DIST = 'cosine'
 n_rerank = 100
-result_dir = '/data/project/rw/viewer_CBIR/viewer/results/'
+result_dir = f'/data/project/rw/viewer_CBIR/viewer/{dataset}_results/'
 pred_sim_dir = os.path.join(result_dir, algorithm)
-output_dir = os.path.join(result_dir, f'{algorithm}_rerank')
+output_dir = os.path.join(result_dir, f'{algorithm}_rerank{n_rerank}')
 print(f'running for {algorithm}')
 print(f'reranking {n_rerank}')
 print(f'results will be saved at output_dir')
@@ -46,11 +49,19 @@ if not os.path.isdir(output_dir):
     print(f'creating {output_dir}...')
 
 # get resnet feature
-resnet_feature_file = '/data/public/rw/datasets/visual_genome/Resnet_feature/wholeImg.hdf5'
+# resnet_feature_file = '/data/public/rw/datasets/visual_genome/Resnet_feature/wholeImg.hdf5'
+resnet_feature_file = f'/data/project/rw/CBIR/data/{dataset}/resnet152.h5'
 f = h5py.File(resnet_feature_file, 'r')
 id2idx = {img_id: int(idx) for idx, img_id in enumerate(f['id'])}
 
-l_train, l_test = get_visual_genome_coco_split()
+if dataset == 'coco':
+    ds = CocoDataset()
+    l_test = ds.d_split['test']
+elif dataset == 'f30k':
+    ds = FlickrDataset()
+    l_test = ds.d_split['test']
+
+# l_train, l_test = get_visual_genome_coco_split()
 if DB_SET == 'train':
     l_target = l_train[:]
 elif DB_SET == 'test':
@@ -61,7 +72,7 @@ time_s = time()
 l_target_feature = []
 for tg_img_id in tqdm(l_target):
     tg_img_idx = id2idx[tg_img_id]
-    target_feature = f['data'][tg_img_idx]
+    target_feature = f['resnet_feature'][tg_img_idx]
     l_target_feature.append(target_feature)
 target_features = np.array(l_target_feature)
 print(f'{time() - time_s:.2f} sec')
@@ -76,8 +87,8 @@ print(f'processing {len(l_files)} files...')
 # for each file
 for pred_file in tqdm(l_files):
     query_id = pred_file.split('.')[0]
-    img_idx = id2idx[query_id]
-    test_feature = f['data'][img_idx]
+    img_idx = id2idx[int(query_id)]
+    test_feature = f['resnet_feature'][img_idx]
  
     # read prediction file
     query_sim_file = os.path.join(pred_sim_dir, query_id + '.tsv')
@@ -85,7 +96,7 @@ for pred_file in tqdm(l_files):
     df_pred_sim = df_pred_sim.drop(index=df_pred_sim.index[df_pred_sim[0]==int(query_id)])  # remove self
     # print(df_pred_sim.sort_values(1, ascending=False).head())
     l_candidate_id = list(df_pred_sim[0])
-    l_candidate_idx = [id2tgtidx[str(c_id)] for c_id in l_candidate_id]
+    l_candidate_idx = [id2tgtidx[int(c_id)] for c_id in l_candidate_id]
     candidate_features = target_features[l_candidate_idx]  # 
 
     # compute resnet feature
@@ -100,6 +111,6 @@ for pred_file in tqdm(l_files):
     # set their similarity as 0
     df_pred_sim['resnet'] = sim
     df_pred_sim = df_pred_sim.sort_values('resnet', ascending=False)[:n_rerank]
-    df_pred_sim[[0, 1]].to_csv(f'/data/project/rw/viewer_CBIR/viewer/results/{algorithm}_rerank/{query_id}.tsv', sep='\t', header=False, index=False)
+    df_pred_sim[[0, 1]].to_csv(os.path.join(output_dir, f'{query_id}.tsv'), sep='\t', header=False, index=False)
     # print(df_pred_sim.sort_values(1, ascending=False).head())
 
