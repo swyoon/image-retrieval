@@ -8,6 +8,18 @@ from pycocotools.coco import COCO
 import numpy as np
 import json as jsonmod
 import pickle
+import pandas as pd
+
+
+def get_reranked_ids(dataset, img_id, n_rerank=100):
+    resnet_dir = f'/data/project/rw/viewer_CBIR/viewer/{dataset}_results/resnet'
+    pred_file = os.path.join(resnet_dir, f'{img_id}.tsv')
+    df = pd.read_csv(pred_file, header=None, sep='\t')
+    df.columns = ['img_id', 'sim']
+    df = df.drop(index=df.index[df['img_id'] == img_id])
+    df = df.sort_values('sim', ascending=False)[:n_rerank]
+    l_id =  df['img_id'].tolist()
+    return l_id
 
 
 def get_karpathy_split_light(verbose=True):
@@ -104,7 +116,8 @@ def get_paths(path, name='coco', use_restval=False):
 class CocoDataset(data.Dataset):
     """update by woong.ssang"""
     def __init__(self, root='/data/project/rw/CBIR/data/coco',
-                 vocab=None, transform=None, ids=None):
+                 vocab=None, transform=None, ids=None,
+                 sg_path='/data/project/rw/CBIR/data/coco/coco_sgg.pkl'):
         """
         Args:
             root: image directory.
@@ -209,7 +222,8 @@ class FlickrDataset(data.Dataset):
     """
 
     def __init__(self, root='/data/project/rw/CBIR/data/f30k', 
-                 vocab=None, transform=None):
+                 vocab=None, transform=None,
+                 sg_path=False):
         self.root = root
         self.img_dir = os.path.join(root, 'images')
         self.vocab = vocab
@@ -231,6 +245,15 @@ class FlickrDataset(data.Dataset):
                                 if t['split'] == split]
                         for split in ['train', 'val', 'test']}
 
+        if not (sg_path == False):
+            if sg_path is None:
+                self.sg_path = '/data/project/rw/CBIR/data/f30k/f30k_sgg.pkl'
+            else:
+                self.sg_path = sg_path
+            self.sg = pickle.load(open(self.sg_path, 'rb'))
+
+            self.d_imgid2sgidx = {sg_['imgid']: i for i, sg_ in enumerate(self.sg)}
+
     def get_img_path(self, img_id):
         return os.path.join(self.img_dir, self.d_imgid2filename[img_id])
 
@@ -242,6 +265,10 @@ class FlickrDataset(data.Dataset):
 
     def get_caption(self, cap_id):
         return self.d_captions[cap_id]
+
+    def imgid2sg(self, img_id):
+        sgidx = self.d_imgid2sgidx[img_id]
+        return self.sg[sgidx]
 
     def __getitem__(self, index):
         """This function returns a tuple that is further passed to collate_fn

@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torchvision
 import numpy as np
 
 class TripletLoss(nn.Module):
@@ -204,6 +205,48 @@ class HGAN_V2(HGAN):
 
         else:
             raise NotImplementedError
+
+
+
+class DeepMetric(nn.Module):
+    def __init__(self, backbone='resnet152', finetune=False, normalize=False,
+                 mode='regression', margin=None):
+        super().__init__()
+        self.backbone = backbone
+        self.finetune = finetune
+        self.normalize = normalize
+        self.mode = mode
+        self.margin = margin
+        assert mode in ('regression', 'triplet')
+        if backbone == 'resnet152':
+            resnet = torchvision.models.resnet152(pretrained=True)
+            feature_part = list(resnet.children())[:-1]
+            net = nn.Sequential(*feature_part)
+
+        if not finetune:
+            for p in net.parameters():
+                p.requires_grad = False
+        self.net = net
+
+    def forward(self, img1, img2):
+        rep1 = self.net(img1)
+        rep2 = self.net(img2)
+        if self.normalize:
+            rep1 = rep1 / rep1.norm(dim=1, keepdim=True)
+            rep2 = rep2 / rep2.norm(dim=1, keepdim=True)
+        sim = (rep1 * rep2).sum(dim=1)
+        return sim
+
+    def loss(self, img1, img2, score_or_img3):
+        if self.mode == 'regression':
+            score = score_or_img3
+            sim = self(img1, img2)
+            return ((score - sim) ** 2).mean()
+        elif self.mode == 'triplet':
+            img3 = score_or_img3
+            sim1 = self(img1, img2)  # pos
+            sim2 = self(img1, img3)  # neg
+            return F.relu(- sim1 + sim2 + self.margin).mean()
 
 
 
