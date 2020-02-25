@@ -210,13 +210,14 @@ class HGAN_V2(HGAN):
 
 class DeepMetric(nn.Module):
     def __init__(self, backbone='resnet152', finetune=False, normalize=False,
-                 mode='regression', margin=None):
+                 mode='regression', margin=None, embedding_dim=1024):
         super().__init__()
         self.backbone = backbone
         self.finetune = finetune
         self.normalize = normalize
         self.mode = mode
         self.margin = margin
+        self.embed = nn.Conv2d(2048, embedding_dim, 1)
         assert mode in ('regression', 'triplet')
         if backbone == 'resnet152':
             resnet = torchvision.models.resnet152(pretrained=True)
@@ -230,7 +231,9 @@ class DeepMetric(nn.Module):
 
     def forward(self, img1, img2):
         rep1 = self.net(img1)
+        rep1 = self.embed(rep1)
         rep2 = self.net(img2)
+        rep2 = self.embed(rep2)
         if self.normalize:
             rep1 = rep1 / rep1.norm(dim=1, keepdim=True)
             rep2 = rep2 / rep2.norm(dim=1, keepdim=True)

@@ -6,7 +6,7 @@ import torchvision.transforms as TF
 from torch.utils.data import Dataset
 import operator
 import os
-from data import CocoDataset, FlickrDataset
+from data import CocoDataset, FlickrDataset, VGDataset
 from PIL import Image
 
 def sampling(prob):
@@ -63,7 +63,7 @@ def he_sampling_v2(adj, num_steps, max_num_he, eps_prob=0.001):
     row_sum = np.sum(adj, axis=1, keepdims=True)
     adj = adj / row_sum
 
-    start_node = np.random.choice(n_nodes, max_num_he*2, p=init_prob)
+    start_node = np.random.choice(n_nodes, max_num_he*3, p=init_prob)
 
     HEs = [[n] for n in start_node]
     for k in range(num_steps - 1):
@@ -115,13 +115,14 @@ def upsampling(sorted_vg_id, tail_range, num_sample_per_range):
 
 
 class DsetImgPairwise(Dataset):
-    def __init__(self, dataset_name, sims, tail_range, split='train', transforms=None):
+    def __init__(self, dataset_name, sims, tail_range, split='train', transforms=None,
+                 sample_mode='train'):
         if dataset_name == 'coco':
             self.ds = CocoDataset()
         elif dataset_name == 'f30k':
             self.ds = FlickrDataset()
-        elif dataset_name == 'vg':
-            pass
+        elif dataset_name == 'vg_coco':
+            self.ds = VGDataset()
         else:
             raise ValueError(f'Invalid dataset_name {dataset_name}')
 
@@ -132,6 +133,7 @@ class DsetImgPairwise(Dataset):
         self.l_iter_id = None
         self.tail_range = tail_range  # if 0, do not use tail oversampling
         self.transforms = transforms
+        self.sample_mode = sample_mode
 
     def __len__(self):
         if self.l_iter_id is None:
@@ -156,17 +158,42 @@ class DsetImgPairwise(Dataset):
             return self.get_by_id(img_id)
 
     def sample_pair(self, img_id):
-        scores = self.sims.sims[self.sims.id2idx[img_id]][self.l_indices]
-        sorted_idx = np.argsort(scores)[::-1]  # decreasing order
-        sorted_idx = sorted_idx[1:]  # exclude self
-        if np.random.rand(1) < 0.5 and self.tail_range > 0:
-            pair_idx = sorted_idx[np.random.randint(self.tail_range)]
-        else:
-            pair_idx = sorted_idx[np.random.randint(len(sorted_idx))]
-        pair_id = self.l_id[pair_idx]
-        score = scores[pair_idx]
-        return pair_id, score
+        if self.sample_mode == 'train':
+            scores = self.sims.sims[self.sims.id2idx[img_id]][self.l_indices]
+            sorted_idx = np.argsort(scores)[::-1]  # decreasing order
+            sorted_idx = sorted_idx[1:]  # exclude self
+            if np.random.rand(1) < 0.5 and self.tail_range > 0:
+                pair_idx = sorted_idx[np.random.randint(self.tail_range)]
+            else:
+                pair_idx = sorted_idx[np.random.randint(len(sorted_idx))]
+            pair_id = self.l_id[pair_idx]
+            score = scores[pair_idx]
+            return pair_id, score
+        elif self.sample_mode == 'three':
+            scores = self.sims.sims[self.sims.id2idx[img_id]][self.l_indices]
+            sorted_idx = np.argsort(scores)[::-1]  # decreasing order
+            sorted_idx = sorted_idx[1:]  # exclude self
+            r = np.random.rand(1)
+            if r < 0.33 and self.tail_range > 0:
+                pair_idx = sorted_idx[np.random.randint(self.tail_range)]
+            elif 0.33 < r <= 0.66:
+                pair_idx = sorted_idx[np.random.randint(self.tail_range,
+                                                        high=len(sorted_idx) - self.tail_range)]
+            else:
+                pair_idx = sorted_idx[np.random.randint(len(sorted_idx) - self.tail_range,
+                                                        high=len(sorted_idx))]
+            pair_id = self.l_id[pair_idx]
+            score = scores[pair_idx]
+            return pair_id, score
 
+        elif self.sample_mode == 'test':
+            scores = self.sims.sims[self.sims.id2idx[img_id]][self.l_indices]
+            sorted_idx = np.argsort(scores)[::-1]  # decreasing order
+            sorted_idx = sorted_idx[1:]  # exclude self
+            pair_idx = sorted_idx[np.random.randint(self.tail_range)]
+            pair_id = self.l_id[pair_idx]
+            score = scores[pair_idx]
+            return pair_id, score
 
     def get_by_id(self, img_id):
         anchor_img = Image.open(self.ds.get_img_path(img_id)).convert('RGB')
@@ -180,16 +207,11 @@ class DsetImgPairwise(Dataset):
 
 
 class DsetSGPairwise(Dataset):
-    def __init__(self, dataset_name, sims, tail_range, split='train', transforms=None,
-                 sg_path=None, mode='bbox_fixed', num_steps=3, max_num_he=100):
-        if dataset_name == 'coco':
-            self.ds = CocoDataset(sg_path=sg_path)
-        elif dataset_name == 'f30k':
-            self.ds = FlickrDataset(sg_path=sg_path)
-        elif dataset_name == 'vg':
-            pass
-        else:
-            raise ValueError(f'Invalid dataset_name {dataset_name}')
+    def __init__(self, ds, sims, tail_range, split='train', transforms=None,
+                 mode='bbox_fixed', num_steps=3, max_num_he=100, sample_mode='train'):
+        self.ds = ds
+        assert isinstance(ds, CocoDataset) or isinstance(ds, FlickrDataset) or isinstance(ds, VGDataset),\
+                'Requires dataset object'
 
         self.sims = sims
         self.split = split
@@ -199,6 +221,7 @@ class DsetSGPairwise(Dataset):
         self.tail_range = tail_range  # if 0, do not use tail oversampling
         self.transforms = transforms
         self.mode = mode
+        self.sample_mode = sample_mode 
         self.num_steps = num_steps
         self.max_num_he = max_num_he
 
@@ -227,16 +250,27 @@ class DsetSGPairwise(Dataset):
         return anchor_data, pair_data, score
 
     def sample_pair(self, img_id):
-        scores = self.sims.sims[self.sims.id2idx[img_id]][self.l_indices]
-        sorted_idx = np.argsort(scores)[::-1]  # decreasing order
-        sorted_idx = sorted_idx[1:]  # exclude self
-        if np.random.rand(1) < 0.5 and self.tail_range > 0:
+        if self.sample_mode == 'train':
+            scores = self.sims.sims[self.sims.id2idx[img_id]][self.l_indices]
+            sorted_idx = np.argsort(scores)[::-1]  # decreasing order
+            sorted_idx = sorted_idx[1:]  # exclude self
+            if np.random.rand(1) < 0.5 and self.tail_range > 0:
+                pair_idx = sorted_idx[np.random.randint(self.tail_range)]
+            else:
+                pair_idx = sorted_idx[np.random.randint(len(sorted_idx))]
+            pair_id = self.l_id[pair_idx]
+            score = scores[pair_idx]
+            return pair_id, score
+        elif self.sample_mode == 'test':
+            scores = self.sims.sims[self.sims.id2idx[img_id]][self.l_indices]
+            sorted_idx = np.argsort(scores)[::-1]  # decreasing order
+            sorted_idx = sorted_idx[1:]  # exclude self
             pair_idx = sorted_idx[np.random.randint(self.tail_range)]
-        else:
-            pair_idx = sorted_idx[np.random.randint(len(sorted_idx))]
-        pair_id = self.l_id[pair_idx]
-        score = scores[pair_idx]
-        return pair_id, score
+            pair_id = self.l_id[pair_idx]
+            score = scores[pair_idx]
+            return pair_id, score
+
+
 
     def get_by_id(self, img_id):
         # get scene graph
@@ -269,7 +303,19 @@ class DsetSGPairwise(Dataset):
             features = torch.stack(l_features)
             return features
         elif self.mode == 'word':
-            pass
+            l_features = []
+            # if len(HEs) < 100:
+            #     print(img_id)
+            for HE in HEs:
+                l_row = []
+                for node in HE:
+                    word = sg['node_labels'][node]
+                    l_row.append(torch.tensor(self.ds.word2emb(word), dtype=torch.float))
+                l_features.append(torch.mean(torch.stack(l_row), dim=0))
+            features = torch.stack(l_features)
+            out = torch.zeros(self.max_num_he, features.shape[1])
+            out[:len(features),:] = features
+            return out 
 
 
 class Dset_VG_Pairwise(Dataset):

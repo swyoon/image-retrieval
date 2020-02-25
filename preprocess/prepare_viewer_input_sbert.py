@@ -14,10 +14,10 @@ from time import time
 from tqdm import tqdm
 import sys
 sys.path.append('../')
-from data import BERTSimilarity, get_karpathy_split_light, FlickrDataset
+from data import BERTSimilarity, get_karpathy_split_light, FlickrDataset, VGDataset
 
 
-DATASET = 'f30k'  # one of ('coco', 'f30k')
+DATASET = 'vg_coco'  # one of ('coco', 'f30k')
 print('Preparing similarity scores for CBIR web viewer...')
 
 if DATASET == 'coco':
@@ -39,6 +39,13 @@ elif DATASET == 'f30k':
     d_split = flickr.d_split
     l_test = d_split['test']
     print(f'total {len(l_test)} images')
+elif DATASET == 'vg_coco':
+    vg = VGDataset()
+    l_test = vg.d_split['test']
+    time_s = time()
+    sims = BERTSimilarity('/data/project/rw/CBIR/data/vg_coco/vg_coco_sbert_mean.npy',
+                          '/data/project/rw/CBIR/data/vg_coco/vg_coco_sbert_img_id.npy')
+    print(f'Loading SBERT score {time() - time_s:.2f} sec')
 else:
     raise ValueError
 

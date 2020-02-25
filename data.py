@@ -11,8 +11,11 @@ import pickle
 import pandas as pd
 
 
-def get_reranked_ids(dataset, img_id, n_rerank=100):
-    resnet_dir = f'/data/project/rw/viewer_CBIR/viewer/{dataset}_results/resnet'
+def get_reranked_ids(dataset, img_id, n_rerank=100, split='test'):
+    if split == 'test':
+        resnet_dir = f'/data/project/rw/viewer_CBIR/viewer/{dataset}_results/resnet'
+    else:
+        resnet_dir = f'/data/project/rw/viewer_CBIR/viewer/{dataset}_results/{split}_resnet'
     pred_file = os.path.join(resnet_dir, f'{img_id}.tsv')
     df = pd.read_csv(pred_file, header=None, sep='\t')
     df.columns = ['img_id', 'sim']
@@ -116,8 +119,8 @@ def get_paths(path, name='coco', use_restval=False):
 class CocoDataset(data.Dataset):
     """update by woong.ssang"""
     def __init__(self, root='/data/project/rw/CBIR/data/coco',
-                 vocab=None, transform=None, ids=None,
-                 sg_path='/data/project/rw/CBIR/data/coco/coco_sgg.pkl'):
+                 vocab_emb=None, vocab2idx=None, idx2vocab=None, 
+                 sg_path=False):
         """
         Args:
             root: image directory.
@@ -134,8 +137,21 @@ class CocoDataset(data.Dataset):
         self.train_coco = COCO(train_cap_path)
         self.val_coco = COCO(val_cap_path)
 
-        self.vocab = vocab
-        self.transform = transform
+        if not (sg_path == False):
+            if sg_path is None:
+                self.sg_path = '/data/project/rw/CBIR/data/coco/coco_sgg_freq_prior_with_adj.pkl'
+            else:
+                self.sg_path = sg_path
+            self.sg = pickle.load(open(self.sg_path, 'rb'))
+
+            self.d_imgid2sgidx = {sg_['imgid']: i for i, sg_ in enumerate(self.sg)}
+
+        if vocab_emb is not None:
+            self.vocab_emb = pickle.load(open(vocab_emb, 'rb'))
+        if vocab2idx is not None:
+            self.vocab2idx = pickle.load(open(vocab2idx, 'rb'))
+        if idx2vocab is not None:
+            self.idx2vocab = pickle.load(open(idx2vocab, 'rb'))
 
     def _get_coco_by_imgid(self, img_id):
         """returns appropriate coco object"""
@@ -178,42 +194,8 @@ class CocoDataset(data.Dataset):
         coco = self._get_coco_by_capid(cap_id)
         return coco.loadAnns(cap_id)[0]['caption']
 
-    # def __getitem__(self, index):
-    #     """This function returns a tuple that is further passed to collate_fn
-    #     """
-    #     vocab = self.vocab
-    #     root, caption, img_id, path, image = self.get_raw_item(index)
-
-    #     if self.transform is not None:
-    #         image = self.transform(image)
-
-    #     # Convert caption (string) to word ids.
-    #     tokens = nltk.tokenize.word_tokenize(
-    #         str(caption).lower())
-    #     caption = []
-    #     caption.append(vocab('<start>'))
-    #     caption.extend([vocab(token) for token in tokens])
-    #     caption.append(vocab('<end>'))
-    #     target = torch.Tensor(caption)
-    #     return image, target, index, img_id
-
-    # def get_raw_item(self, index):
-    #     if index < self.bp:
-    #         coco = self.coco[0]
-    #         root = self.root[0]
-    #     else:
-    #         coco = self.coco[1]
-    #         root = self.root[1]
-    #     ann_id = self.ids[index]
-    #     caption = coco.anns[ann_id]['caption']
-    #     img_id = coco.anns[ann_id]['image_id']
-    #     path = coco.loadImgs(img_id)[0]['file_name']
-    #     image = Image.open(os.path.join(root, path)).convert('RGB')
-
-    #     return root, caption, img_id, path, image
-
-    # def __len__(self):
-    #     return len(self.ids)
+    def word2emb(self, word):
+        return self.vocab_emb[self.vocab2idx[word]]
 
 
 class FlickrDataset(data.Dataset):
@@ -222,18 +204,14 @@ class FlickrDataset(data.Dataset):
     """
 
     def __init__(self, root='/data/project/rw/CBIR/data/f30k', 
-                 vocab=None, transform=None,
+                 vocab_emb=None, vocab2idx=None, idx2vocab=None, transform=None,
                  sg_path=False):
         self.root = root
         self.img_dir = os.path.join(root, 'images')
-        self.vocab = vocab
         self.transform = transform
         json_path = os.path.join(root, 'dataset_flickr30k.json')
         self.dataset = jsonmod.load(open(json_path, 'r'))['images']
         self.ids = []
-        # for i, d in enumerate(self.dataset):
-        #     if d['split'] == split:
-        #         self.ids += [(i, x) for x in range(len(d['sentences']))]
 
         self.d_imgid2capid = {t['imgid']: t['sentids'] for t in self.dataset}
         self.d_imgid2filename = {t['imgid']: t['filename'] for t in self.dataset}
@@ -254,6 +232,13 @@ class FlickrDataset(data.Dataset):
 
             self.d_imgid2sgidx = {sg_['imgid']: i for i, sg_ in enumerate(self.sg)}
 
+        if vocab_emb is not None:
+            self.vocab_emb = pickle.load(open(vocab_emb, 'rb'))
+        if vocab2idx is not None:
+            self.vocab2idx = pickle.load(open(vocab2idx, 'rb'))
+        if idx2vocab is not None:
+            self.idx2vocab = pickle.load(open(idx2vocab, 'rb'))
+
     def get_img_path(self, img_id):
         return os.path.join(self.img_dir, self.d_imgid2filename[img_id])
 
@@ -270,32 +255,42 @@ class FlickrDataset(data.Dataset):
         sgidx = self.d_imgid2sgidx[img_id]
         return self.sg[sgidx]
 
-    def __getitem__(self, index):
-        """This function returns a tuple that is further passed to collate_fn
-        """
-        vocab = self.vocab
-        root = self.root
-        ann_id = self.ids[index]
-        img_id = ann_id[0]
-        caption = self.dataset[img_id]['sentences'][ann_id[1]]['raw']
-        path = self.dataset[img_id]['filename']
+    def word2emb(self, word):
+        return self.vocab_emb[self.vocab2idx[word]]
 
-        image = Image.open(os.path.join(root, path)).convert('RGB')
-        if self.transform is not None:
-            image = self.transform(image)
 
-        # Convert caption (string) to word ids.
-        tokens = nltk.tokenize.word_tokenize(
-            str(caption).lower())
-        caption = []
-        caption.append(vocab('<start>'))
-        caption.extend([vocab(token) for token in tokens])
-        caption.append(vocab('<end>'))
-        target = torch.Tensor(caption)
-        return image, target, index, img_id
+class VGDataset:
+    def __init__(self, root='/data/project/rw/CBIR/data/vg_coco',
+                 vocab_emb=None, vocab2idx=None, idx2vocab=None, sg_path=False):
+        self.root = root
+        self.img_dir = os.path.join(root, 'images')
+        self.d_split = pickle.load(open('/data/project/rw/CBIR/data/vg_coco/vg_coco_split.pkl', 'rb'))
 
-    def __len__(self):
-        return len(self.ids)
+        if not (sg_path == False):
+            if sg_path is None:
+                self.sg_path = '/data/project/rw/CBIR/data/vg_coco/vg_coco_sgg.pkl'
+            else:
+                self.sg_path = sg_path
+            self.sg = pickle.load(open(self.sg_path, 'rb'))
+
+            self.d_imgid2sgidx = {sg_['imgid']: i for i, sg_ in enumerate(self.sg)}
+
+        if vocab_emb is not None:
+            self.vocab_emb = pickle.load(open(vocab_emb, 'rb'))
+        if vocab2idx is not None:
+            self.vocab2idx = pickle.load(open(vocab2idx, 'rb'))
+        if idx2vocab is not None:
+            self.idx2vocab = pickle.load(open(idx2vocab, 'rb'))
+
+    def word2emb(self, word):
+        return self.vocab_emb[self.vocab2idx[word]]
+
+    def imgid2sg(self, img_id):
+        sgidx = self.d_imgid2sgidx[img_id]
+        return self.sg[sgidx]
+
+    def get_img_path(self, img_id):
+        return os.path.join(self.img_dir, f'{img_id}.jpg')
 
 
 class PrecompDataset(data.Dataset):

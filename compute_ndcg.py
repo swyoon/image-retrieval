@@ -13,7 +13,7 @@ from collections import defaultdict
 import time
 import argparse
 from tqdm import tqdm
-from data import CocoDataset, FlickrDataset, get_reranked_ids, BERTSimilarity
+from data import CocoDataset, FlickrDataset, get_reranked_ids, BERTSimilarity, VGDataset
 
 #
 # Functions
@@ -128,118 +128,129 @@ def get_train_test_split(split_json='/data/project/rw/CBIR/img_split.json'):
             l_test_id.append(vg_id)
     return sorted(l_train_id), sorted(l_test_id)
 
+if __name__ == '__main__':
 
-#
-#  Configuration
-#
+    #
+    #  Configuration
+    #
 
-parser = argparse.ArgumentParser()
-parser.add_argument('dataset', type=str, help='dataset name', choices=('vg', 'coco', 'f30k'))
-parser.add_argument('model_name', type=str, help='The name of directory to be searched for predicted similarity score')
-parser.add_argument('--resultdir', type=str, default='/data/project/rw/viewer_CBIR/viewer/results/')
-# parser.add_argument('--query', type=str, default='all', help='list of query ids. comma separated.')
-parser.add_argument('--zero-baseline', action='store_true')
-parser.add_argument('--resnet', type=float, default=None, help='portion of resnet similarity in relevance')
-args = parser.parse_args()
+    parser = argparse.ArgumentParser()
+    parser.add_argument('dataset', type=str, help='dataset name', choices=('vg_coco', 'coco', 'f30k'))
+    parser.add_argument('model_name', type=str, help='The name of directory to be searched for predicted similarity score')
+    parser.add_argument('--resultdir', type=str, default='/data/project/rw/viewer_CBIR/viewer/results/')
+    parser.add_argument('--json', action='store_true', help='use separate json file to load query image ids. only valid for vg_coco dataset')
+    parser.add_argument('--zero-baseline', action='store_true')
+    # parser.add_argument('--resnet', type=float, default=None, help='portion of resnet similarity in relevance')
+    args = parser.parse_args()
 
-if args.model_name == 'random':
-    pred_sim_dir = f'/data/project/rw/viewer_CBIR/viewer/{args.dataset}_results/resnet'
-else:
-    pred_sim_dir = f'/data/project/rw/viewer_CBIR/viewer/{args.dataset}_results/{args.model_name}'
-# pred_sim_dir = os.path.join(args.resultdir, args.model_name)
-print(f'Computing NDCG for {pred_sim_dir}...')
-
-if args.dataset == 'coco':
-    ds = CocoDataset()
-    l_query_id = ds.d_split['test']
-    bert_sim_file = '/data/project/rw/CBIR/data/coco/coco_sbert_mean.npy'
-    bert_id_file = '/data/project/rw/CBIR/data/coco/coco_sbert_img_id.npy'
-elif args.dataset == 'f30k':
-    ds = FlickrDataset()
-    l_query_id = ds.d_split['test']
-    bert_sim_file = '/data/project/rw/CBIR/data/f30k/f30k_sbert_mean.npy'
-    bert_id_file = '/data/project/rw/CBIR/data/f30k/f30k_sbert_img_id.npy'
-elif args.dataset == 'vg':
-    pass
-print(f'running for {len(l_query_id)} queries')
-
-# if args.query == 'all':
-#     l_query_id = [s.split('.')[0] for s in os.listdir(pred_sim_dir)]
-#     print(f'running for all tsv files in {pred_sim_dir}')
-# elif args.query == 'paper':
-#     selected_id_file = 'test_id_1000_v3.json'
-#     # selected_id_file = 'test_id_1000.json'
-#     with open(selected_id_file, 'r') as f:
-#         l_query_id = json.load(f)
-#     print(f'running for selected ids in {selected_id_file}')
-# else:
-#     l_query_id = args.query.strip().split(',')
-#     print(f'running for {l_query_id}')
-
-if args.zero_baseline:
-    print('adjust the smallest similarity score to zero')
-    if args.resnet:
-        print('using minimum score for resnet weight 0.55')
-        min_score = 0.606
-        # 새로운 sbert score 는 -1에서 1인 것이 반영됨
-    else:
-        min_score = 0.59
-    print(f'min_score {min_score} ')
-
-    # min_sbert_score = 0.59
-    # min_resnet_score = 1.124
-    # print(f'min_sbert_score {min_sbert_score} ')
-    # print(f'min_resnet_score {min_resnet_score} ')
-else:
-    print('Using raw similarity score')
-
-"""load true similarity files"""
-sbert_sim = BERTSimilarity(bert_sim_file, bert_id_file)
-
-"""load train/test split"""
-ks = (5, 10, 20, 30, 40, 50)
-d_result = {k: [] for k in ks}
-
-
-for query_id in tqdm(l_query_id):
-    query_sim_file = os.path.join(pred_sim_dir, f'{query_id}.tsv')
-    df_pred_sim = pd.read_csv(query_sim_file, header=None, sep='\t')
-    df_pred_sim.columns = ['img_id', 'sim']
-    df_pred_sim = df_pred_sim.set_index('img_id')
-
-    # print(len(df_pred_sim))
-    l_reranked = get_reranked_ids(args.dataset, query_id)
-    df_pred_sim = df_pred_sim.loc[l_reranked]
-    # print(len(df_pred_sim))
-
-    # df_pred_sim = df_pred_sim.drop(index=df_pred_sim.index[df_pred_sim[0]==int(query_id)])  # drop self
-    l_candidate_id = list(df_pred_sim.index)
-
-    true_sim = torch.tensor([sbert_sim.get_similarity(query_id, img_id) for img_id in l_candidate_id]).view(1, -1).to(dtype=torch.float)
-    true_sim.clamp_(min=0)
-    # if args.zero_baseline:
-    #     true_sim -= min_score
     if args.model_name == 'random':
-        pred_sim = torch.rand_like(true_sim)
+        pred_sim_dir = f'/data/project/rw/viewer_CBIR/viewer/{args.dataset}_results/resnet'
     else:
-        pred_sim = torch.tensor(df_pred_sim['sim'].values).view(1, -1)
+        pred_sim_dir = f'/data/project/rw/viewer_CBIR/viewer/{args.dataset}_results/{args.model_name}'
+    # pred_sim_dir = os.path.join(args.resultdir, args.model_name)
+    print(f'Computing NDCG for {pred_sim_dir}...')
 
-    assert torch.all(true_sim >= 0)
-    d_ndcg = ndcg_batch(pred_sim, true_sim, ks=ks)
-    # d_ndcg = ndcg_batch(-true_sim, true_sim, ks=ks)
-    for k in ks:
-        d_result[k].append(d_ndcg[k])
+    if args.dataset == 'coco':
+        ds = CocoDataset()
+        l_query_id = ds.d_split['test']
+        bert_sim_file = '/data/project/rw/CBIR/data/coco/coco_sbert_mean.npy'
+        bert_id_file = '/data/project/rw/CBIR/data/coco/coco_sbert_img_id.npy'
+    elif args.dataset == 'f30k':
+        ds = FlickrDataset()
+        l_query_id = ds.d_split['test']
+        bert_sim_file = '/data/project/rw/CBIR/data/f30k/f30k_sbert_mean.npy'
+        bert_id_file = '/data/project/rw/CBIR/data/f30k/f30k_sbert_img_id.npy'
+    elif args.dataset == 'vg_coco':
+        ds = VGDataset()
+        if args.json:
+            selected_id_file = 'test_id_1000_v3.json'
+            with open(selected_id_file, 'r') as f:
+                l_query_id = json.load(f)
+                l_query_id = list(map(int, l_query_id))
+        else:
+            l_query_id = ds.d_split['test']
+        bert_sim_file = '/data/project/rw/CBIR/data/vg_coco/vg_coco_sbert_mean.npy'
+        bert_id_file = '/data/project/rw/CBIR/data/vg_coco/vg_coco_sbert_img_id.npy'
+    print(f'running for {len(l_query_id)} queries')
+
+    # if args.query == 'all':
+    #     l_query_id = [s.split('.')[0] for s in os.listdir(pred_sim_dir)]
+    #     print(f'running for all tsv files in {pred_sim_dir}')
+    # elif args.query == 'paper':
+    #     selected_id_file = 'test_id_1000_v3.json'
+    #     # selected_id_file = 'test_id_1000.json'
+    #     with open(selected_id_file, 'r') as f:
+    #         l_query_id = json.load(f)
+    #     print(f'running for selected ids in {selected_id_file}')
+    # else:
+    #     l_query_id = args.query.strip().split(',')
+    #     print(f'running for {l_query_id}')
+
+    if args.zero_baseline:
+        print('adjust the smallest similarity score to zero')
+        if args.resnet:
+            print('using minimum score for resnet weight 0.55')
+            min_score = 0.606
+            # 새로운 sbert score 는 -1에서 1인 것이 반영됨
+        else:
+            min_score = 0.59
+        print(f'min_score {min_score} ')
+
+        # min_sbert_score = 0.59
+        # min_resnet_score = 1.124
+        # print(f'min_sbert_score {min_sbert_score} ')
+        # print(f'min_resnet_score {min_resnet_score} ')
+    else:
+        print('Using raw similarity score')
+
+    """load true similarity files"""
+    sbert_sim = BERTSimilarity(bert_sim_file, bert_id_file)
+
+    """load train/test split"""
+    ks = (5, 10, 20, 30, 40, 50)
+    d_result = {k: [] for k in ks}
+
+    # import warnings
+    # warnings.filterwarnings("error")
+
+    for query_id in tqdm(l_query_id):
+        query_sim_file = os.path.join(pred_sim_dir, f'{query_id}.tsv')
+        df_pred_sim = pd.read_csv(query_sim_file, header=None, sep='\t')
+        df_pred_sim.columns = ['img_id', 'sim']
+        df_pred_sim = df_pred_sim.set_index('img_id')
+
+        # print(len(df_pred_sim))
+        l_reranked = get_reranked_ids(args.dataset, query_id)
+        df_pred_sim = df_pred_sim.loc[l_reranked]
+        # print(len(df_pred_sim))
+
+        # df_pred_sim = df_pred_sim.drop(index=df_pred_sim.index[df_pred_sim[0]==int(query_id)])  # drop self
+        l_candidate_id = list(df_pred_sim.index)
+
+        true_sim = torch.tensor([sbert_sim.get_similarity(query_id, img_id) for img_id in l_candidate_id]).view(1, -1).to(dtype=torch.float)
+        true_sim.clamp_(min=0)
+        # if args.zero_baseline:
+        #     true_sim -= min_score
+        if args.model_name == 'random':
+            pred_sim = torch.rand_like(true_sim)
+        else:
+            pred_sim = torch.tensor(df_pred_sim['sim'].values).view(1, -1)
+
+        assert torch.all(true_sim >= 0)
+        d_ndcg = ndcg_batch(pred_sim, true_sim, ks=ks)
+        # d_ndcg = ndcg_batch(-true_sim, true_sim, ks=ks)
+        for k in ks:
+            d_result[k].append(d_ndcg[k])
 
 
-d_result = {k: np.mean(v) for k, v in d_result.items()} 
-print(d_result)
-for k in sorted(d_result.keys()):
-    print(k, f'{d_result[k]:.4f}')
-print(','.join(map(str, ks)))
-print(','.join([f'{d_result[k]:.4f}' for k in ks]))
-# save result
-# output_file = f"ndcg_{args.model_name}.pkl"
-# with open(output_file, "wb") as f:
-#     pickle.dump(d_result, f)
-#     print(f'result saved in {output_file}')
+    d_result = {k: np.mean(v) for k, v in d_result.items()} 
+    for k in sorted(d_result.keys()):
+        print(k, f'{d_result[k]:.4f}')
+    print(','.join(map(str, ks)))
+    print(','.join([f'{d_result[k]:.4f}' for k in ks]))
+    # save result
+    # output_file = f"ndcg_{args.model_name}.pkl"
+    # with open(output_file, "wb") as f:
+    #     pickle.dump(d_result, f)
+    #     print(f'result saved in {output_file}')
 
