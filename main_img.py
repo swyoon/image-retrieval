@@ -171,7 +171,7 @@ def main():
     model.cuda()
 
     optimizer = optim.Adam(model.parameters(), lr=model_cfg['MODEL']['LR'])
-    # lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.9)
+    lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.9)
     # lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[7, 15], gamma=0.5)
 
 
@@ -204,7 +204,7 @@ def main():
             num_iter += 1
             break
 
-        # lr_scheduler.step()
+        lr_scheduler.step()
 
         torch.save({'idx_epoch': idx_epoch,
                     'num_iter': num_iter,
@@ -217,14 +217,16 @@ def main():
         torch.set_grad_enabled(False)
         model.eval()
 
-        # for b_idx, mini_batch in enumerate(tqdm(test_dloader)):
-        #     mini_batch = [m.cuda() for m in mini_batch]
-        #     loss = model.loss(*mini_batch)
+        # validation loss
+        for b_idx, mini_batch in enumerate(tqdm(test_dloader)):
+            mini_batch = [m.cuda() for m in mini_batch]
+            loss = model.loss(*mini_batch)
 
-        #     test_loss.append(loss.item())
-        #     summary.add_scalar('loss/test', loss.item(), num_iter_test)
-        #     num_iter_test += 1
+            test_loss.append(loss.item())
+            summary.add_scalar('loss/test', loss.item(), num_iter_test)
+            num_iter_test += 1
 
+        # validation ndcg
         l_pred = []
         l_true_rel = []
         for val_id in tqdm(l_val_ids):
@@ -251,32 +253,6 @@ def main():
         for k in ks:
             summary.add_scalar(f'ndcg/{k}', val_ndcg[k], idx_epoch+1)
 
-
-
-
-        """
-        # ------------ Full Inference -----------------------
-        #if idx_epoch > 0 and idx_epoch % 20 == 0:
-        if idx_epoch % 20 == 0:
-            infer_results = {}
-            for idx_infer, vid in enumerate(vg_id_infer):
-                print("INFERENCE, epoch: {}, num_infer: {}".format(idx_epoch, idx_infer))
-                infer_sg = sg_test[vid]
-                word_vec_anchor = get_word_vec(infer_sg, vocab2idx, vocab_glove)
-                HE_anchor = he_sampling(infer_sg['adj'], word_vec_anchor, infer_dset.sampling_steps, infer_dset.max_num_he)
-                infer_result = {}
-
-                for b_idx, mini_batch in enumerate(tqdm(infer_dloader)):
-                    # HE_compare, vg_id_compare = mini_batch
-                    score, _ = prop_mini_batch_infer(mini_batch, vid, HE_anchor, infer_dset.label, infer_dset.label_id2idx, model)
-                    score_arr = [s.item() for s in score]
-                    infer_result.update( list(zip(mini_batch[1], score_arr)) )
-
-                infer_results[vid] = infer_result
-
-            if args.debug == False:
-                save_json(infer_results, result_path+'/infer_result_epoch_{}.json'.format(idx_epoch))
-        """
 
 if __name__ == "__main__":
     main()

@@ -17,6 +17,7 @@ from glob import glob
 import pandas as pd
 from data import BERTSimilarity, get_reranked_ids, FlickrDataset, CocoDataset, VGDataset
 from joblib import delayed, Parallel
+from compute_ndcg import ndcg_batch
 
 
 def split_id(l, split_idx, n_split):
@@ -73,9 +74,6 @@ def inference(dataset_name, model, infer_dset, args):
 
         # get resnet rerank list
         l_reranked = get_reranked_ids(dataset_name, vid, n_rerank=100)
-        # infer_dset.set_iter_ids(l_reranked)
-        # dl = DataLoader(infer_dset, shuffle=False, num_workers=5, batch_size=20)
-
 
         # get image list
         time_s = time.time()
@@ -127,7 +125,7 @@ def main():
     parser.add_argument("--resume", type=int, default=0)
     parser.add_argument("--inference", action='store_true')
     parser.add_argument("--json", action='store_true', help='run inference on test_id_1000_v3.json file')
-    parser.add_argument("--num_workers", type=int, default=32)
+    parser.add_argument("--num_workers", type=int, default=28)
     parser.add_argument("--max_epoch", type=int, default=500)
     parser.add_argument("--tb_path", type=str, default='/data/project/rw/woong.ssang/CBIR/tb/')
     parser.add_argument("--ckpt_path", type=str, default='/data/project/rw/woong.ssang/CBIR/ckpt/')
@@ -185,11 +183,16 @@ def main():
         infer_dset = DsetSGPairwise(ds, sims, tail_range=model_cfg['MODEL']['TAIL_RANGE'], split='test',
                                     mode='word')
     else:
+        if dataset_name == 'vg_coco':
+            val_split = 'test'
+        else:
+            val_split = 'val'
+
         train_dset = DsetSGPairwise(ds, sims, tail_range=model_cfg['MODEL']['TAIL_RANGE'], split='train',
                                     mode='word')
         train_dloader = DataLoader(train_dset, batch_size=model_cfg['MODEL']['BATCH_SIZE'], num_workers=args.num_workers,
                                    shuffle=True)
-        test_dset = DsetSGPairwise(ds, sims, tail_range=model_cfg['MODEL']['TAIL_RANGE'], split='val',
+        test_dset = DsetSGPairwise(ds, sims, tail_range=model_cfg['MODEL']['TAIL_RANGE'], split=val_split,
                                    mode='word')
         test_dloader = DataLoader(test_dset, batch_size=model_cfg['MODEL']['BATCH_SIZE'], num_workers=args.num_workers, shuffle=False)
 
@@ -200,7 +203,7 @@ def main():
     model.cuda()
 
     optimizer = optim.Adam(model.parameters(), lr=model_cfg['MODEL']['LR'])
-    # lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.9)
+    lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.9)
     # lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[7, 15], gamma=0.5)
 
 
@@ -208,6 +211,8 @@ def main():
         inference(dataset_name, model, infer_dset, args)
         return 0
     # ------------ Iteration -----------------------
+    l_val_ids = sorted(test_dset.l_id)[:10]
+    ks = (5, 10, 20)
     train_loss = []
     num_iter = 0
     num_iter_test = 0
@@ -231,8 +236,7 @@ def main():
             summary.add_scalar('loss/train', loss.item(), num_iter)
             num_iter += 1
 
-
-        # lr_scheduler.step()
+        lr_scheduler.step()
 
         torch.save({'idx_epoch': idx_epoch,
                     'num_iter': num_iter,
@@ -244,6 +248,8 @@ def main():
         torch.set_grad_enabled(False)
         model.eval()
 
+        # --------- validation ---------
+        # validation loss
         for b_idx, mini_batch in enumerate(tqdm(test_dloader)):
             mini_batch = [m.cuda() for m in mini_batch]
             pred, loss = model(*mini_batch)
@@ -252,42 +258,33 @@ def main():
             summary.add_scalar('loss/test', loss.item(), num_iter_test)
             num_iter_test += 1
 
-        # l_val_id = test_dset.l_id[:10]
-        # for vid in l_val_id:
-        #     l_reranked = get_reranked_ids(dataset_name, vid, n_rerank=100)
-        #     target = torch.stack([infer_dset.get_by_id(img_id) for img_id in l_reranked])
-        #     query = infer_dset.get_by_id(vid)
-        #     query = query.unsqueeze(0).repeat(len(target), 1, 1)
-        #     query = query.cuda()
-        #     with torch.no_grad():
-        #         score, _ = model.score(query, target)
-        #         score = score.detach().cpu().flatten().tolist()
+        # validation ndcg
+        l_pred = []
+        l_true_rel = []
+        for val_id in tqdm(l_val_ids):
+            l_reranked = get_reranked_ids(dataset_name, val_id, n_rerank=100, split=val_split)
 
+            l_imgs = Parallel(n_jobs=5, prefer='threads')(delayed(test_dset.get_by_id)(img_id) for img_id in l_reranked)
+            target = torch.stack(l_imgs)
+            target = target.cuda()
 
-
-        """
-        # ------------ Full Inference -----------------------
-        #if idx_epoch > 0 and idx_epoch % 20 == 0:
-        if idx_epoch % 20 == 0:
-            infer_results = {}
-            for idx_infer, vid in enumerate(vg_id_infer):
-                print("INFERENCE, epoch: {}, num_infer: {}".format(idx_epoch, idx_infer))
-                infer_sg = sg_test[vid]
-                word_vec_anchor = get_word_vec(infer_sg, vocab2idx, vocab_glove)
-                HE_anchor = he_sampling(infer_sg['adj'], word_vec_anchor, infer_dset.sampling_steps, infer_dset.max_num_he)
-                infer_result = {}
-
-                for b_idx, mini_batch in enumerate(tqdm(infer_dloader)):
-                    # HE_compare, vg_id_compare = mini_batch
-                    score, _ = prop_mini_batch_infer(mini_batch, vid, HE_anchor, infer_dset.label, infer_dset.label_id2idx, model)
-                    score_arr = [s.item() for s in score]
-                    infer_result.update( list(zip(mini_batch[1], score_arr)) )
-
-                infer_results[vid] = infer_result
-
-            if args.debug == False:
-                save_json(infer_results, result_path+'/infer_result_epoch_{}.json'.format(idx_epoch))
-        """
+            query = test_dset.get_by_id(val_id)
+            query = query.unsqueeze(0).repeat(len(target), 1, 1)
+            query = query.cuda()
+            with torch.no_grad():
+                score, _ = model.score(query, target)
+                score = score.detach().cpu().flatten().tolist()
+            l_rel = [sims.get_similarity(val_id, id_) for id_ in l_reranked]
+            l_pred.append(score)
+            l_true_rel.append(l_rel)
+        l_true_rel = torch.tensor(l_true_rel, dtype=torch.float)
+        l_pred = torch.tensor(l_pred, dtype=torch.float)
+        val_ndcg = ndcg_batch(l_pred, l_true_rel, ks=ks)
+        for k in ks:
+            val_ndcg[k] = val_ndcg[k].mean().item()
+        print(f'epoch: {idx_epoch}, {val_ndcg}')
+        for k in ks:
+            summary.add_scalar(f'ndcg/{k}', val_ndcg[k], idx_epoch+1)
 
 if __name__ == "__main__":
     main()
