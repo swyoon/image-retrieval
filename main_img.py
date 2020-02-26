@@ -10,6 +10,7 @@ from torch.utils.data import DataLoader
 from torchvision import transforms
 from model import DeepMetric
 import time
+import json
 from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
 from glob import glob
@@ -46,9 +47,13 @@ def inference(dataset_name, model, infer_dset, args):
     if not os.path.exists(result_viewer_path):
         os.makedirs(result_viewer_path)
 
-    # path_test_img_id_1000 = '/data/project/rw/CBIR/test_id_1000_v2.json'
-    # test_img_id_1000 = load_files(path_test_img_id_1000)
-    vids = infer_dset.ds.d_split['test']  # test set image id
+    if args.json:
+        selected_id_file = 'test_id_1000_v3.json'
+        with open(selected_id_file, 'r') as f:
+            vids = json.load(f)
+            vids = list(map(int, vids))
+    else:
+        vids = infer_dset.ds.d_split['test']  # test set image id
     infer_dset.sims = None
 
     for vid in tqdm(vids):
@@ -104,6 +109,7 @@ def main():
     parser.add_argument("--exp_name", default="han_sbert_tail_6_in_100_HE_100_3")
     parser.add_argument("--trg_opt", type=str, default='SBERT')
     parser.add_argument("--resume", type=int, default=0)
+    parser.add_argument("--json", action='store_true', help='run inference on test_id_1000_v3.json file')
     parser.add_argument("--inference", action='store_true')
     parser.add_argument("--num_workers", type=int, default=12)
     parser.add_argument("--max_epoch", type=int, default=500)
@@ -192,6 +198,10 @@ def main():
 
         for b_idx, mini_batch in enumerate(tqdm(train_dloader)):
             mini_batch = [m.cuda() for m in mini_batch]
+            if len(mini_batch[0].shape) == 4:
+                mini_batch[0] = mini_batch[0].view(-1, mini_batch[0].shape[1], mini_batch[0].shape[2])
+                mini_batch[1] = mini_batch[1].view(-1, mini_batch[1].shape[1], mini_batch[1].shape[2])
+
             optimizer.zero_grad()
             loss = model.loss(*mini_batch)
 
@@ -220,6 +230,10 @@ def main():
         # validation loss
         for b_idx, mini_batch in enumerate(tqdm(test_dloader)):
             mini_batch = [m.cuda() for m in mini_batch]
+            if len(mini_batch[0].shape) == 4:
+                mini_batch[0] = mini_batch[0].view(-1, mini_batch[0].shape[1], mini_batch[0].shape[2])
+                mini_batch[1] = mini_batch[1].view(-1, mini_batch[1].shape[1], mini_batch[1].shape[2])
+
             loss = model.loss(*mini_batch)
 
             test_loss.append(loss.item())

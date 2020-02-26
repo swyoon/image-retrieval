@@ -40,21 +40,25 @@ def inference(dataset_name, model, infer_dset, args):
         print("Error!, No saved models!")
         return -1
 
-    num = []
-    for ckpt in ckpts:
-        tokens = ckpt.split('.')
-        num.append(int(tokens[-3].split('_')[-1]))
+    if args.epoch is None:
+        num = []
+        for ckpt in ckpts:
+            tokens = ckpt.split('.')
+            num.append(int(tokens[-3].split('_')[-1]))
 
-    num.sort()
-    last_ckpt = os.path.join(ckpt_path, 'ckpt_' + str(num[-1]) + '.pth.tar')
-    print("Load the last model, epoch: %d" % (num[-1]))
+        num.sort()
+        loaded_epoch = num[-1]
+    else:
+        loaded_epoch = args.epoch
+    last_ckpt = os.path.join(ckpt_path, 'ckpt_' + str(loaded_epoch) + '.pth.tar')
+    print("Load the last model, epoch: %d" % (loaded_epoch))
 
     checkpoint = torch.load(last_ckpt)
     model.load_state_dict(checkpoint['state_dict'])
     print("loaded checkpoint '{}' (epoch {})".format(ckpts[-1], checkpoint['idx_epoch']))
 
     result_viewer_path = '/data/project/rw/viewer_CBIR/viewer/{}_results/{}_epoch_{}'.format(dataset_name, 
-                                                                                             args.exp_name, num[-1])
+                                                                                             args.exp_name, loaded_epoch)
     if not os.path.exists(result_viewer_path):
         os.makedirs(result_viewer_path)
 
@@ -89,9 +93,7 @@ def inference(dataset_name, model, infer_dset, args):
         # get test image
         query = infer_dset.get_by_id(vid)
         query = query.unsqueeze(0).repeat(len(target), 1, 1)
-        # query = query.unsqueeze(0)
         query = query.cuda()
-        # from pudb import set_trace; set_trace()
 
         # l_score = []
         # for batch in dl:
@@ -102,7 +104,7 @@ def inference(dataset_name, model, infer_dset, args):
         # score = l_score
 
         # run prediction
-        time_s = time.time()
+        # time_s = time.time()
         with torch.no_grad():
             score, _ = model.score(query, target)
             score = score.detach().cpu().flatten().tolist()
@@ -126,7 +128,8 @@ def main():
     parser.add_argument("--inference", action='store_true')
     parser.add_argument("--json", action='store_true', help='run inference on test_id_1000_v3.json file')
     parser.add_argument("--num_workers", type=int, default=28)
-    parser.add_argument("--max_epoch", type=int, default=500)
+    parser.add_argument("--max_epoch", type=int, default=20)
+    parser.add_argument("--epoch", type=int, default=None)
     parser.add_argument("--tb_path", type=str, default='/data/project/rw/woong.ssang/CBIR/tb/')
     parser.add_argument("--ckpt_path", type=str, default='/data/project/rw/woong.ssang/CBIR/ckpt/')
     parser.add_argument("--split_idx", type=int, default=None)
@@ -150,11 +153,17 @@ def main():
     if dataset_name == 'coco':
         sim_mat_file = '/data/project/rw/CBIR/data/coco/coco_sbert_mean.npy'
         sim_id_file = '/data/project/rw/CBIR/data/coco/coco_sbert_img_id.npy'
+        sg_path = '/data/project/rw/CBIR/data/coco/coco_sgg_freq_prior_with_adj.pkl'
+        vocab_emb_path = '/data/project/rw/CBIR/data/coco/glove_embs_coco_sgg_freq_prior.pkl' 
+        vocab2idx_path = '/data/project/rw/CBIR/data/coco/vocab2idx_coco_sgg_freq_prior.pkl' 
+        idx2vocab_path = '/data/project/rw/CBIR/data/coco/idx2vocab_coco_sgg_freq_prior.pkl'
         sims = BERTSimilarity(sim_mat_file, sim_id_file)
+        ds = CocoDataset(vocab_emb=vocab_emb_path, vocab2idx=vocab2idx_path, idx2vocab=idx2vocab_path,
+                         sg_path=sg_path)
     elif dataset_name == 'f30k':
         sim_mat_file = '/data/project/rw/CBIR/data/f30k/f30k_sbert_mean.npy'
         sim_id_file = '/data/project/rw/CBIR/data/f30k/f30k_sbert_img_id.npy'
-        sg_path = '/data/project/rw/CBIR/data/f30k/f30k_sgg.pkl'
+        sg_path = '/data/project/rw/CBIR/data/f30k/f30k_sgg_freq_prior_with_adj.pkl'
         vocab_emb_path = '/data/project/rw/CBIR/data/f30k/glove_embs_f30k_sgg_freq_prior.pkl' 
         vocab2idx_path = '/data/project/rw/CBIR/data/f30k/vocab2idx_f30k_sgg_freq_prior.pkl' 
         idx2vocab_path = '/data/project/rw/CBIR/data/f30k/idx2vocab_f30k_sgg_freq_prior.pkl'
@@ -165,10 +174,16 @@ def main():
     elif dataset_name == 'vg_coco':
         sim_mat_file = '/data/project/rw/CBIR/data/vg_coco/vg_coco_sbert_mean.npy'
         sim_id_file = '/data/project/rw/CBIR/data/vg_coco/vg_coco_sbert_img_id.npy'
-        sg_path = '/data/project/rw/CBIR/data/vg_coco/vg_coco_sgg.pkl'
-        vocab_emb_path = '/data/project/rw/CBIR/data/vg_coco/glove_embs_vg_coco_sg_butd.pkl' 
-        vocab2idx_path = '/data/project/rw/CBIR/data/vg_coco/vocab2idx_vg_coco_sg_butd.pkl' 
-        idx2vocab_path = '/data/project/rw/CBIR/data/vg_coco/idx2vocab_vg_coco_sg_butd.pkl'
+        if model_cfg['DATASET']['TYPE'] == 'GT':
+            sg_path = '/data/project/rw/CBIR/data/vg_coco/vg_coco_gt_sg.pkl'
+            vocab_emb_path = '/data/project/rw/CBIR/data/vg_coco/glove_embs_vg_coco_sg.pkl' 
+            vocab2idx_path = '/data/project/rw/CBIR/data/vg_coco/vocab2idx_vg_coco_sg.pkl' 
+            idx2vocab_path = '/data/project/rw/CBIR/data/vg_coco/idx2vocab_vg_coco_sg.pkl'
+        elif model_cfg['DATASET']['TYPE'] == 'gen':
+            sg_path = '/data/project/rw/CBIR/data/vg_coco/vg_coco_sgg.pkl'
+            vocab_emb_path = '/data/project/rw/CBIR/data/vg_coco/glove_embs_vg_coco_sg_butd.pkl' 
+            vocab2idx_path = '/data/project/rw/CBIR/data/vg_coco/vocab2idx_vg_coco_sg_butd.pkl' 
+            idx2vocab_path = '/data/project/rw/CBIR/data/vg_coco/idx2vocab_vg_coco_sg_butd.pkl'
         sims = BERTSimilarity(sim_mat_file, sim_id_file)
         ds = VGDataset(vocab_emb=vocab_emb_path, vocab2idx=vocab2idx_path, idx2vocab=idx2vocab_path,
                        sg_path=sg_path)
@@ -188,17 +203,18 @@ def main():
         else:
             val_split = 'val'
 
-        train_dset = DsetSGPairwise(ds, sims, tail_range=model_cfg['MODEL']['TAIL_RANGE'], split='train',
-                                    mode='word')
-        train_dloader = DataLoader(train_dset, batch_size=model_cfg['MODEL']['BATCH_SIZE'], num_workers=args.num_workers,
+        mcfg = model_cfg['MODEL']
+        train_dset = DsetSGPairwise(ds, sims, tail_range=mcfg['TAIL_RANGE'], split='train',
+                                    mode=mcfg['MODE'], sample_mode=mcfg['SAMPLE_MODE'],
+                                    num_steps=mcfg['STEP'], max_num_he=mcfg['NUM_MAX_HE'])
+        train_dloader = DataLoader(train_dset, batch_size=mcfg['BATCH_SIZE'], num_workers=args.num_workers,
                                    shuffle=True)
-        test_dset = DsetSGPairwise(ds, sims, tail_range=model_cfg['MODEL']['TAIL_RANGE'], split=val_split,
-                                   mode='word')
-        test_dloader = DataLoader(test_dset, batch_size=model_cfg['MODEL']['BATCH_SIZE'], num_workers=args.num_workers, shuffle=False)
+        test_dset = DsetSGPairwise(ds, sims, tail_range=mcfg['TAIL_RANGE'], split=val_split,
+                                   mode=mcfg['MODE'], sample_mode=mcfg['SAMPLE_MODE'],
+                                   num_steps=mcfg['STEP'], max_num_he=mcfg['NUM_MAX_HE'])
+        test_dloader = DataLoader(test_dset, batch_size=mcfg['BATCH_SIZE'], num_workers=args.num_workers, shuffle=False)
 
     # ------------ Model -----------------------
-    # model = DeepMetric(backbone='resnet152', finetune=d_model['FINETUNE'],
-    #                    normalize=d_model['NORMALIZE'], mode=d_model['MODE'], margin=d_model['MARGIN'])
     model = HGAN(model_cfg)
     model.cuda()
 
@@ -224,8 +240,10 @@ def main():
 
         for b_idx, mini_batch in enumerate(tqdm(train_dloader)):
             mini_batch = [m.cuda() for m in mini_batch]
+            if len(mini_batch[0].shape) == 4:
+                mini_batch[0] = mini_batch[0].view(-1, mini_batch[0].shape[2], mini_batch[0].shape[3])
+                mini_batch[1] = mini_batch[1].view(-1, mini_batch[1].shape[2], mini_batch[1].shape[3])
             optimizer.zero_grad()
-            # loss = model.loss(*mini_batch)
             pred, loss = model(*mini_batch)
 
             train_loss.append(loss.item())
@@ -252,6 +270,9 @@ def main():
         # validation loss
         for b_idx, mini_batch in enumerate(tqdm(test_dloader)):
             mini_batch = [m.cuda() for m in mini_batch]
+            if len(mini_batch[0].shape) == 4:
+                mini_batch[0] = mini_batch[0].view(-1, mini_batch[0].shape[2], mini_batch[0].shape[3])
+                mini_batch[1] = mini_batch[1].view(-1, mini_batch[1].shape[2], mini_batch[1].shape[3])
             pred, loss = model(*mini_batch)
 
             test_loss.append(loss.item())

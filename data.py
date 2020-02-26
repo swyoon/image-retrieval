@@ -133,7 +133,7 @@ class CocoDataset(data.Dataset):
         self.ann_dir = os.path.join(root, 'annotations')
         train_cap_path = os.path.join(self.ann_dir, 'captions_train2014.json')
         val_cap_path = os.path.join(self.ann_dir, 'captions_val2014.json')
-        self.d_split = get_karpathy_split_light()
+        self.d_split = get_karpathy_split_light()  # key: split, val: list of cocoid
         self.train_coco = COCO(train_cap_path)
         self.val_coco = COCO(val_cap_path)
 
@@ -144,7 +144,7 @@ class CocoDataset(data.Dataset):
                 self.sg_path = sg_path
             self.sg = pickle.load(open(self.sg_path, 'rb'))
 
-            self.d_imgid2sgidx = {sg_['imgid']: i for i, sg_ in enumerate(self.sg)}
+            self.d_imgid2sgidx = {sg_['cocoid']: i for i, sg_ in enumerate(self.sg)}
 
         if vocab_emb is not None:
             self.vocab_emb = pickle.load(open(vocab_emb, 'rb'))
@@ -196,6 +196,10 @@ class CocoDataset(data.Dataset):
 
     def word2emb(self, word):
         return self.vocab_emb[self.vocab2idx[word]]
+
+    def imgid2sg(self, img_id):
+        sgidx = self.d_imgid2sgidx[img_id]
+        return self.sg[sgidx]
 
 
 class FlickrDataset(data.Dataset):

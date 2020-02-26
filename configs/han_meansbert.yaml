@@ -1,5 +1,5 @@
 DATASET:
-  NAME: "vg"
+  NAME: "vg_coco"
   PATH: "/data/project/rw/VG_eskim"
   SG_TRAIN: "/data/project/rw/CBIR/scene_graph_with_adj_train.pkl"
   SG_TEST: "/data/project/rw/CBIR/scene_graph_with_adj_test.pkl"

@@ -63,7 +63,7 @@ def he_sampling_v2(adj, num_steps, max_num_he, eps_prob=0.001):
     row_sum = np.sum(adj, axis=1, keepdims=True)
     adj = adj / row_sum
 
-    start_node = np.random.choice(n_nodes, max_num_he*3, p=init_prob)
+    start_node = np.random.choice(n_nodes, max_num_he*2, p=init_prob)
 
     HEs = [[n] for n in start_node]
     for k in range(num_steps - 1):
@@ -142,20 +142,16 @@ class DsetImgPairwise(Dataset):
             return len(self.l_iter_id)
 
     def __getitem__(self, idx):
-        if self.l_iter_id is None:  # training mode
-            img_id = self.l_id[idx]
-            pair_id, score = self.sample_pair(img_id)
-            anchor_img = Image.open(self.ds.get_img_path(img_id)).convert('RGB')
-            pair_img = Image.open(self.ds.get_img_path(pair_id)).convert('RGB')
-
-            if self.transforms is not None:
-                anchor_img = self.transforms(anchor_img)
-                pair_img = self.transforms(pair_img)
-
-            return anchor_img, pair_img, score
+        img_id = self.l_id[idx]
+        anchor_img = self.get_by_id(img_id)
+        pair_id, score = self.sample_pair(img_id)
+        if self.sample_mode == 'tmb':
+            pair_img = torch.stack([self.get_by_id(pid) for pid in pair_id])
+            anchor_img = torch.cat([anchor_img.unsqueeze(0)] * len(pair_img))
+            return anchor_img, pair_img, torch.tensor(score, dtype=torch.float)
         else:
-            img_id = self.l_iter_id[idx]
-            return self.get_by_id(img_id)
+            pair_img = self.get_by_id(pair_id)
+            return anchor_img, pair_img, score
 
     def sample_pair(self, img_id):
         if self.sample_mode == 'train':
@@ -185,7 +181,6 @@ class DsetImgPairwise(Dataset):
             pair_id = self.l_id[pair_idx]
             score = scores[pair_idx]
             return pair_id, score
-
         elif self.sample_mode == 'test':
             scores = self.sims.sims[self.sims.id2idx[img_id]][self.l_indices]
             sorted_idx = np.argsort(scores)[::-1]  # decreasing order
@@ -194,6 +189,35 @@ class DsetImgPairwise(Dataset):
             pair_id = self.l_id[pair_idx]
             score = scores[pair_idx]
             return pair_id, score
+        elif self.sample_mode == 'tmb':
+            scores = self.sims.sims[self.sims.id2idx[img_id]][self.l_indices]
+            sorted_idx = np.argsort(scores)[::-1]  # decreasing order
+            sorted_idx = sorted_idx[1:]  # exclude self
+            N = len(sorted_idx)
+            l_pair_id = []
+            l_score = []
+            # top
+            for _ in range(2):
+                pair_idx = sorted_idx[np.random.randint(self.tail_range)]
+                pair_id = self.l_id[pair_idx]
+                score = scores[pair_idx]
+                l_pair_id.append(pair_id)
+                l_score.append(score)
+            # middle
+            for _ in range(2):
+                pair_idx = sorted_idx[np.random.randint(low=self.tail_range, high=N-self.tail_range)]
+                pair_id = self.l_id[pair_idx]
+                score = scores[pair_idx]
+                l_pair_id.append(pair_id)
+                l_score.append(score)
+            # botten
+            for _ in range(2):
+                pair_idx = sorted_idx[np.random.randint(low=N-self.tail_range, high=N)]
+                pair_id = self.l_id[pair_idx]
+                score = scores[pair_idx]
+                l_pair_id.append(pair_id)
+                l_score.append(score)
+            return l_pair_id, l_score
 
     def get_by_id(self, img_id):
         anchor_img = Image.open(self.ds.get_img_path(img_id)).convert('RGB')
@@ -208,7 +232,7 @@ class DsetImgPairwise(Dataset):
 
 class DsetSGPairwise(Dataset):
     def __init__(self, ds, sims, tail_range, split='train', transforms=None,
-                 mode='bbox_fixed', num_steps=3, max_num_he=100, sample_mode='train'):
+                 mode='word', num_steps=3, max_num_he=100, sample_mode='tail_random'):
         self.ds = ds
         assert isinstance(ds, CocoDataset) or isinstance(ds, FlickrDataset) or isinstance(ds, VGDataset),\
                 'Requires dataset object'
@@ -224,15 +248,16 @@ class DsetSGPairwise(Dataset):
         self.sample_mode = sample_mode 
         self.num_steps = num_steps
         self.max_num_he = max_num_he
+        print(f'mode: {mode}, sample_mode: {sample_mode}, num_steps: {num_steps}, max_num_he: {max_num_he}, tail_range: {tail_range}')
 
         self.tr_normalize = TF.Normalize(mean=[0.485, 0.456, 0.406],
                                          std=[0.229, 0.224, 0.225])
         self.tr_to_tensor = TF.ToTensor()
-        if self.mode == 'bbox_fixed':
+        if self.mode == 'fixedbbox':
             resnet = models.resnet18(pretrained=True)
             feature_part = list(resnet.children())[:-1]
             resnet = nn.Sequential(*feature_part)
-            resnet = resnet.cuda()
+            resnet = resnet
             resnet.eval()
             self.resnet = resnet
 
@@ -244,13 +269,18 @@ class DsetSGPairwise(Dataset):
 
     def __getitem__(self, idx):
         img_id = self.l_id[idx]
-        pair_id, score = self.sample_pair(img_id)
         anchor_data = self.get_by_id(img_id)
-        pair_data = self.get_by_id(pair_id)
-        return anchor_data, pair_data, score
+        pair_id, score = self.sample_pair(img_id)
+        if self.sample_mode == 'tmb':
+            pair_data = torch.stack([self.get_by_id(pid) for pid in pair_id])
+            anchor_data = anchor_data.unsqueeze(0).repeat(len(pair_data), 1, 1)
+            return anchor_data, pair_data, torch.tensor(score, dtype=torch.float)
+        else:
+            pair_data = self.get_by_id(pair_id)
+            return anchor_data, pair_data, score
 
     def sample_pair(self, img_id):
-        if self.sample_mode == 'train':
+        if self.sample_mode == 'tail_random':
             scores = self.sims.sims[self.sims.id2idx[img_id]][self.l_indices]
             sorted_idx = np.argsort(scores)[::-1]  # decreasing order
             sorted_idx = sorted_idx[1:]  # exclude self
@@ -261,16 +291,37 @@ class DsetSGPairwise(Dataset):
             pair_id = self.l_id[pair_idx]
             score = scores[pair_idx]
             return pair_id, score
-        elif self.sample_mode == 'test':
+        elif self.sample_mode == 'tmb':
             scores = self.sims.sims[self.sims.id2idx[img_id]][self.l_indices]
             sorted_idx = np.argsort(scores)[::-1]  # decreasing order
             sorted_idx = sorted_idx[1:]  # exclude self
-            pair_idx = sorted_idx[np.random.randint(self.tail_range)]
-            pair_id = self.l_id[pair_idx]
-            score = scores[pair_idx]
-            return pair_id, score
-
-
+            N = len(sorted_idx)
+            l_pair_id = []
+            l_score = []
+            # top
+            for _ in range(2):
+                pair_idx = sorted_idx[np.random.randint(self.tail_range)]
+                pair_id = self.l_id[pair_idx]
+                score = scores[pair_idx]
+                l_pair_id.append(pair_id)
+                l_score.append(score)
+            # middle
+            for _ in range(2):
+                pair_idx = sorted_idx[np.random.randint(low=self.tail_range, high=N-self.tail_range)]
+                pair_id = self.l_id[pair_idx]
+                score = scores[pair_idx]
+                l_pair_id.append(pair_id)
+                l_score.append(score)
+            # botten
+            for _ in range(2):
+                pair_idx = sorted_idx[np.random.randint(low=N-self.tail_range, high=N)]
+                pair_id = self.l_id[pair_idx]
+                score = scores[pair_idx]
+                l_pair_id.append(pair_id)
+                l_score.append(score)
+            return l_pair_id, l_score
+        else:
+            raise ValueError(f'Invalid sample mode {self.sample_mode}')
 
     def get_by_id(self, img_id):
         # get scene graph
@@ -282,30 +333,33 @@ class DsetSGPairwise(Dataset):
         return anchor_data
 
     def node2feature(self, HEs, img_id, sg):
-        if self.mode == 'bbox_fixed':
+        if self.mode == 'fixedbbox':
             img = Image.open(self.ds.get_img_path(img_id)).convert('RGB')
-            w, h = img.size
-            r = max(w, h) / 1024  # for bbox coordinate matching
+            # w, h = img.size
+            # r = max(w, h) / 1024  # for bbox coordinate matching
+            r = 1  # for vg_coco dataset
 
             l_features = []
             for HE in HEs:
                 l_row = [] 
                 for node in HE:
-                    if node < len(sg['bboxes']):  # object
-                        new_bb = sg['bboxes'][node] * r
+                    if node < len(sg['obj_bboxes']):  # object
+                        new_bb = sg['obj_bboxes'][node] * r
                         cropped = img.crop(box=new_bb)
                         img_tensor = self.tr_normalize(self.tr_to_tensor(cropped))
-                        img_tensor = img_tensor.unsqueeze(0).cuda()
+                        img_tensor = img_tensor.unsqueeze(0)# .cuda()
                         feat = self.resnet(img_tensor)
                         feat = feat.squeeze(3).squeeze(2)[0]
                         l_row.append(feat)
+                if len(l_row) == 0:  # no bbox found in this hyperedge
+                    continue
                 l_features.append(torch.mean(torch.stack(l_row), dim=0))
             features = torch.stack(l_features)
-            return features
+            out = torch.zeros(self.max_num_he, features.shape[1])
+            out[:len(features), :] = features
+            return out 
         elif self.mode == 'word':
             l_features = []
-            # if len(HEs) < 100:
-            #     print(img_id)
             for HE in HEs:
                 l_row = []
                 for node in HE:

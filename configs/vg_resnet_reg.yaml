@@ -1,0 +1,15 @@
+DATASET:
+  NAME: "vg_coco"
+MODEL:
+  BATCH_SIZE: 256
+  LR: 0.0001
+  TAIL_RANGE: 200
+  FINETUNE: False
+  NORMALIZE: True 
+  MODE: regression
+  MARGIN: null 
+  EMBEDDING_DIM: 1024
+  SAMPLE_MODE: three
+
+
+
