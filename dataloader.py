@@ -250,16 +250,12 @@ class DsetSGPairwise(Dataset):
         self.max_num_he = max_num_he
         print(f'mode: {mode}, sample_mode: {sample_mode}, num_steps: {num_steps}, max_num_he: {max_num_he}, tail_range: {tail_range}')
 
-        self.tr_normalize = TF.Normalize(mean=[0.485, 0.456, 0.406],
-                                         std=[0.229, 0.224, 0.225])
-        self.tr_to_tensor = TF.ToTensor()
         if self.mode == 'fixedbbox':
-            resnet = models.resnet18(pretrained=True)
-            feature_part = list(resnet.children())[:-1]
-            resnet = nn.Sequential(*feature_part)
-            resnet = resnet
-            resnet.eval()
-            self.resnet = resnet
+            normalize = TF.Normalize(mean=[0.485, 0.456, 0.406],
+                                     std=[0.229, 0.224, 0.225])
+            to_tensor = TF.ToTensor()
+            resize = TF.Resize((64, 64))
+            self.tr = TF.Compose([resize, to_tensor, normalize])
 
     def __len__(self):
         if self.l_iter_id is None:
@@ -272,8 +268,9 @@ class DsetSGPairwise(Dataset):
         anchor_data = self.get_by_id(img_id)
         pair_id, score = self.sample_pair(img_id)
         if self.sample_mode == 'tmb':
-            pair_data = torch.stack([self.get_by_id(pid) for pid in pair_id])
-            anchor_data = anchor_data.unsqueeze(0).repeat(len(pair_data), 1, 1)
+            l_pair_data = [self.get_by_id(pid) for pid in pair_id]
+            pair_data = self._concat_data(l_pair_data)
+            anchor_data = self._repeat_data(anchor_data, len(pair_data))
             return anchor_data, pair_data, torch.tensor(score, dtype=torch.float)
         else:
             pair_data = self.get_by_id(pair_id)
@@ -335,29 +332,34 @@ class DsetSGPairwise(Dataset):
     def node2feature(self, HEs, img_id, sg):
         if self.mode == 'fixedbbox':
             img = Image.open(self.ds.get_img_path(img_id)).convert('RGB')
-            # w, h = img.size
-            # r = max(w, h) / 1024  # for bbox coordinate matching
-            r = 1  # for vg_coco dataset
+            if 'obj_bboxes' in sg:  # VG-COCO previously generated 
+                bboxes = sg['obj_bboxes']
+                r = 1  # for vg_coco dataset
+            else:
+                bboxes = sg['bboxes']
+                w, h = img.size
+                r = max(w, h) / 1024  # for bbox coordinate matching
 
             l_features = []
             for HE in HEs:
                 l_row = [] 
                 for node in HE:
-                    if node < len(sg['obj_bboxes']):  # object
-                        new_bb = sg['obj_bboxes'][node] * r
-                        cropped = img.crop(box=new_bb)
-                        img_tensor = self.tr_normalize(self.tr_to_tensor(cropped))
-                        img_tensor = img_tensor.unsqueeze(0)# .cuda()
-                        feat = self.resnet(img_tensor)
-                        feat = feat.squeeze(3).squeeze(2)[0]
-                        l_row.append(feat)
+                    if node < len(bboxes):  # object
+                        new_bb = bboxes[node] * r
+                        crop_img = img.crop(box=new_bb)
+                        bbox_tensor = self.tr(crop_img)
+                        l_row.append(bbox_tensor)
+
                 if len(l_row) == 0:  # no bbox found in this hyperedge
                     continue
-                l_features.append(torch.mean(torch.stack(l_row), dim=0))
-            features = torch.stack(l_features)
-            out = torch.zeros(self.max_num_he, features.shape[1])
-            out[:len(features), :] = features
-            return out 
+                row = torch.stack(l_row)
+                row_box = -100 * torch.ones(self.num_steps, 3, 64, 64)  # at most num_steps - 1 bbox... but it isn't
+                row_box[:len(row)] = row
+                l_features.append(row_box)
+            features = torch.stack(l_features) 
+            out = - 100 * torch.ones(self.max_num_he, self.num_steps, 3, 64, 64)
+            out[:len(features)] = features
+            return out
         elif self.mode == 'word':
             l_features = []
             for HE in HEs:
@@ -371,6 +373,24 @@ class DsetSGPairwise(Dataset):
             out[:len(features),:] = features
             return out 
 
+    def _concat_data(self, l_x):
+        if isinstance(l_x[0], torch.Tensor):
+            return torch.stack(l_x)
+        elif isinstance(l_x[0], dict):
+            out = {}
+            for key in l_x[0].keys():
+                out[key] = torch.stack([x[key] for x in l_x])
+            return out
+        else:
+            raise ValueError
+
+    def _repeat_data(self, x, n_repeat):
+        if isinstance(x, torch.Tensor):
+            return torch.stack([x] * n_repeat)
+        elif isinstance(x, dict):
+            out = {}
+            for key in x.keys():
+                out[key] = torch.stack([x[key]] * n_repeat)
 
 class Dset_VG_Pairwise(Dataset):
     def __init__(self, cfg, sg, label, label_ids, vocab_glove, vocab2idx, mode):

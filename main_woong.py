@@ -240,9 +240,9 @@ def main():
 
         for b_idx, mini_batch in enumerate(tqdm(train_dloader)):
             mini_batch = [m.cuda() for m in mini_batch]
-            if len(mini_batch[0].shape) == 4:
-                mini_batch[0] = mini_batch[0].view(-1, mini_batch[0].shape[2], mini_batch[0].shape[3])
-                mini_batch[1] = mini_batch[1].view(-1, mini_batch[1].shape[2], mini_batch[1].shape[3])
+            # if len(mini_batch[0].shape) == 4:
+            #     mini_batch[0] = mini_batch[0].view(-1, mini_batch[0].shape[2], mini_batch[0].shape[3])
+            #     mini_batch[1] = mini_batch[1].view(-1, mini_batch[1].shape[2], mini_batch[1].shape[3])
             optimizer.zero_grad()
             pred, loss = model(*mini_batch)
 
@@ -253,6 +253,7 @@ def main():
 
             summary.add_scalar('loss/train', loss.item(), num_iter)
             num_iter += 1
+            break
 
         lr_scheduler.step()
 
@@ -270,9 +271,9 @@ def main():
         # validation loss
         for b_idx, mini_batch in enumerate(tqdm(test_dloader)):
             mini_batch = [m.cuda() for m in mini_batch]
-            if len(mini_batch[0].shape) == 4:
-                mini_batch[0] = mini_batch[0].view(-1, mini_batch[0].shape[2], mini_batch[0].shape[3])
-                mini_batch[1] = mini_batch[1].view(-1, mini_batch[1].shape[2], mini_batch[1].shape[3])
+            # if len(mini_batch[0].shape) == 4:
+            #     mini_batch[0] = mini_batch[0].view(-1, mini_batch[0].shape[2], mini_batch[0].shape[3])
+            #     mini_batch[1] = mini_batch[1].view(-1, mini_batch[1].shape[2], mini_batch[1].shape[3])
             pred, loss = model(*mini_batch)
 
             test_loss.append(loss.item())

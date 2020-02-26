@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torchvision
 import numpy as np
+from torchvision.models import resnet18
 
 class TripletLoss(nn.Module):
     """
@@ -33,13 +34,47 @@ class HGAN(nn.Module):
         self.softmax_att = torch.nn.Softmax(dim=2)
         self.fc_score = torch.nn.Linear(self.nhidden*self.nhead, 1)
 
-        #self.margin = cfg['MODEL']['LOSS_MARGIN']
         if self.cfg['MODEL']['TARGET'] == 'SBERT':
             self.loss = nn.MSELoss()
         else:
+            self.margin = cfg['MODEL']['LOSS_MARGIN']
             self.loss = TripletLoss(self.margin)
 
+        if 'FEATURE' in self.cfg['MODEL']:
+            if self.cfg['MODEL']['FEATURE'] == 'bbox':
+                resnet = resnet18(pretrained=True)
+                feature_part = list(resnet.children())[:-1]
+                net = nn.Sequential(*feature_part)
+                self.cnn = net
+
+            if not self.cfg['MODEL'].get('FINETUNE', True):
+                for p in self.cnn.parameters():
+                    p.requires_grad = False 
+
+    def _preprocess(self, x):
+        if 'FEATURE' not in self.cfg['MODEL'] or self.cfg['MODEL']['FEATURE'] == 'word':
+            if len(x.shape) == 4:
+                return x.view(-1, *x.shape[2:])
+            else:
+                return x
+
+        if self.cfg['MODEL']['FEATURE'] == 'bbox':
+            in_shape = x.shape
+            if len(in_shape) == 6:
+                x = x.view(-1, *in_shape[3:])
+            mask = x[:, 0, 0, 0] != -100
+            real_x = x[mask]
+            feature = self.cnn(real_x).squeeze(2).squeeze(1)
+            out = torch.zeros(in_shape[0] * in_shape[1] * in_shape[2], feature.shape[1]).to(x.device)
+            out = out.masked_scatter_(mask[:,None], feature)
+            out = out.view(in_shape[0], in_shape[1], in_shape[2], feature.shape[1])
+            num = mask.view(*in_shape[:3]).sum(dim=2).unsqueeze(-1).to(torch.float)
+            out = out.sum(dim=2) / num
+            return out
+
     def score(self, he_anchor, he_compare):
+        he_anchor = self._preprocess(he_anchor)
+        he_compare = self._preprocess(he_compare)
         num_he_anchor = he_anchor.shape[1]
         num_he_compare = he_compare.shape[1]
 
