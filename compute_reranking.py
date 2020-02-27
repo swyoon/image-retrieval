@@ -13,7 +13,7 @@ import json
 import numpy as np
 from time import time
 from tqdm import tqdm
-from data import CocoDataset, FlickrDataset
+from data import CocoDataset, FlickrDataset, VGDataset
 
 
 def get_visual_genome_coco_split():
@@ -28,7 +28,7 @@ def get_visual_genome_coco_split():
 
 # setting
 parser = argparse.ArgumentParser()
-parser.add_argument('dataset', type=str, help='dataset name', choices=('coco', 'f30k'))
+parser.add_argument('dataset', type=str, help='dataset name', choices=('coco', 'f30k', 'vg_coco'))
 parser.add_argument('algorithm', type=str, help='The name of directory to be searched for predicted similarity score')
 args = parser.parse_args()
 
@@ -60,6 +60,14 @@ if dataset == 'coco':
 elif dataset == 'f30k':
     ds = FlickrDataset()
     l_test = ds.d_split['test']
+elif dataset == 'vg_coco':
+    ds = VGDataset()
+    selected_id_file = 'test_id_1000_v3.json'
+    with open(selected_id_file, 'r') as f_:
+        vids = json.load(f_)
+        vids = list(map(int, vids))
+    set_vid = set(vids)
+    l_test = ds.d_split['test']
 
 # l_train, l_test = get_visual_genome_coco_split()
 if DB_SET == 'train':
@@ -87,6 +95,9 @@ print(f'processing {len(l_files)} files...')
 # for each file
 for pred_file in tqdm(l_files):
     query_id = pred_file.split('.')[0]
+    if dataset == 'vg_coco':
+        if not int(query_id) in set_vid:
+            continue
     img_idx = id2idx[int(query_id)]
     test_feature = f['resnet_feature'][img_idx]
  

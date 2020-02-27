@@ -18,6 +18,7 @@ from data import BERTSimilarity, get_karpathy_split_light, FlickrDataset, VGData
 
 
 DATASET = 'vg_coco'  # one of ('coco', 'f30k')
+GENCAP = True
 print('Preparing similarity scores for CBIR web viewer...')
 
 if DATASET == 'coco':
@@ -43,14 +44,23 @@ elif DATASET == 'vg_coco':
     vg = VGDataset()
     l_test = vg.d_split['test']
     time_s = time()
-    sims = BERTSimilarity('/data/project/rw/CBIR/data/vg_coco/vg_coco_sbert_mean.npy',
-                          '/data/project/rw/CBIR/data/vg_coco/vg_coco_sbert_img_id.npy')
+    if GENCAP:
+        sims = BERTSimilarity('/data/project/rw/CBIR/data/vg_coco/vg_coco_gencap_sbert.npy',
+                              '/data/project/rw/CBIR/data/vg_coco/vg_coco_gencap_sbert_img_id.npy')
+        print('using sbert score for generated captions')
+    else:
+        sims = BERTSimilarity('/data/project/rw/CBIR/data/vg_coco/vg_coco_sbert_mean.npy',
+                              '/data/project/rw/CBIR/data/vg_coco/vg_coco_sbert_img_id.npy')
     print(f'Loading SBERT score {time() - time_s:.2f} sec')
 else:
     raise ValueError
 
 
-result_dir = f'/data/project/rw/viewer_CBIR/viewer/{DATASET}_results/sbert/'
+if GENCAP:
+    result_dir = f'/data/project/rw/viewer_CBIR/viewer/{DATASET}_results/gencap_sbert/'
+else:
+    result_dir = f'/data/project/rw/viewer_CBIR/viewer/{DATASET}_results/sbert/'
+
 if not os.path.isdir(result_dir):
     os.mkdir(result_dir)
 
