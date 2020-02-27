@@ -1,10 +1,10 @@
 DATASET:
-  NAME: vg_coco
+  NAME: f30k 
   TYPE: gen
 MODEL:
   TARGET: SBERT
   BATCH_SIZE: 32
-  LR: 0.000001
+  LR: 0.0001
   NUM_MAX_HE: 100
   STEP: 3
   WORD_EMB_SIZE: 512
@@ -14,7 +14,7 @@ MODEL:
   SAMPLE_MODE: tail_random 
   MODE: fixedbbox 
   FEATURE: bbox
-  FINETUNE: False
+  FINETUNE: True
 
 
 

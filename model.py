@@ -47,9 +47,9 @@ class HGAN(nn.Module):
                 net = nn.Sequential(*feature_part)
                 self.cnn = net
 
-            if not self.cfg['MODEL'].get('FINETUNE', True):
-                for p in self.cnn.parameters():
-                    p.requires_grad = False 
+                if not self.cfg['MODEL'].get('FINETUNE', True):
+                    for p in self.cnn.parameters():
+                        p.requires_grad = False 
 
     def _preprocess(self, x):
         if 'FEATURE' not in self.cfg['MODEL'] or self.cfg['MODEL']['FEATURE'] == 'word':
@@ -69,6 +69,7 @@ class HGAN(nn.Module):
             out = out.masked_scatter_(mask[:,None], feature)
             out = out.view(in_shape[0], in_shape[1], in_shape[2], feature.shape[1])
             num = mask.view(*in_shape[:3]).sum(dim=2).unsqueeze(-1).to(torch.float)
+            num.clamp_(min=1)
             out = out.sum(dim=2) / num
             return out
 

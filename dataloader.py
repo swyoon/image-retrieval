@@ -269,8 +269,8 @@ class DsetSGPairwise(Dataset):
         pair_id, score = self.sample_pair(img_id)
         if self.sample_mode == 'tmb':
             l_pair_data = [self.get_by_id(pid) for pid in pair_id]
-            pair_data = self._concat_data(l_pair_data)
-            anchor_data = self._repeat_data(anchor_data, len(pair_data))
+            pair_data = concat_data(l_pair_data)
+            anchor_data = repeat_data(anchor_data, len(pair_data))
             return anchor_data, pair_data, torch.tensor(score, dtype=torch.float)
         else:
             pair_data = self.get_by_id(pair_id)
@@ -372,25 +372,30 @@ class DsetSGPairwise(Dataset):
             out = torch.zeros(self.max_num_he, features.shape[1])
             out[:len(features),:] = features
             return out 
-
-    def _concat_data(self, l_x):
-        if isinstance(l_x[0], torch.Tensor):
-            return torch.stack(l_x)
-        elif isinstance(l_x[0], dict):
-            out = {}
-            for key in l_x[0].keys():
-                out[key] = torch.stack([x[key] for x in l_x])
-            return out
         else:
-            raise ValueError
+            raise ValueError(f'Invalid mode {self.mode}')
 
-    def _repeat_data(self, x, n_repeat):
-        if isinstance(x, torch.Tensor):
-            return torch.stack([x] * n_repeat)
-        elif isinstance(x, dict):
-            out = {}
-            for key in x.keys():
-                out[key] = torch.stack([x[key]] * n_repeat)
+
+def concat_data(l_x):
+    if isinstance(l_x[0], torch.Tensor):
+        return torch.stack(l_x)
+    elif isinstance(l_x[0], dict):
+        out = {}
+        for key in l_x[0].keys():
+            out[key] = torch.stack([x[key] for x in l_x])
+        return out
+    else:
+        raise ValueError
+
+
+def repeat_data(x, n_repeat):
+    if isinstance(x, torch.Tensor):
+        return torch.stack([x] * n_repeat)
+    elif isinstance(x, dict):
+        out = {}
+        for key in x.keys():
+            out[key] = torch.stack([x[key]] * n_repeat)
+
 
 class Dset_VG_Pairwise(Dataset):
     def __init__(self, cfg, sg, label, label_ids, vocab_glove, vocab2idx, mode):

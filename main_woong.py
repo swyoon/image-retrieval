@@ -6,7 +6,7 @@ import json
 import torch.optim as optim
 from preprocess.utils import load_files, save_json
 from dataloader import Dset_VG, Dset_VG_inference, Dset_VG_Pairwise, get_word_vec, get_sim, he_sampling, \
-                       DsetImgPairwise, DsetSGPairwise
+                       DsetImgPairwise, DsetSGPairwise, repeat_data, concat_data
 from torch.utils.data import DataLoader
 from torchvision import transforms
 from model import HGAN
@@ -62,7 +62,7 @@ def inference(dataset_name, model, infer_dset, args):
     if not os.path.exists(result_viewer_path):
         os.makedirs(result_viewer_path)
 
-    if args.json:
+    if args.json and dataset_name == 'vg_coco':
         selected_id_file = 'test_id_1000_v3.json'
         with open(selected_id_file, 'r') as f:
             vids = json.load(f)
@@ -81,18 +81,13 @@ def inference(dataset_name, model, infer_dset, args):
 
         # get image list
         time_s = time.time()
-        # target = torch.stack([infer_dset.get_by_id(img_id) for img_id in l_reranked])
-
-        l_imgs = Parallel(n_jobs=3, prefer='threads')(delayed(infer_dset.get_by_id)(img_id) for img_id in l_reranked)
-        target = torch.stack(l_imgs)
-
-        # target = torch.stack([infer_dset.get_by_id(img_id) for img_id in l_reranked])
+        l_imgs = Parallel(n_jobs=args.num_workers, prefer='threads')(delayed(infer_dset.get_by_id)(img_id) for img_id in l_reranked)
+        target = concat_data(l_imgs)
         target = target.cuda()
-        # print(f'image loading {time.time() - time_s} sec')
 
         # get test image
         query = infer_dset.get_by_id(vid)
-        query = query.unsqueeze(0).repeat(len(target), 1, 1)
+        query = repeat_data(query, len(target))
         query = query.cuda()
 
         # l_score = []
@@ -135,6 +130,7 @@ def main():
     parser.add_argument("--split_idx", type=int, default=None)
     parser.add_argument("--n_split", type=int, default=None)
     args = parser.parse_args()
+    print(args)
 
     model_cfg = load_files(args.config_file)
     print(model_cfg)
@@ -194,16 +190,18 @@ def main():
                                      std=[0.229, 0.224, 0.225])
     transform = transforms.Compose([transforms.Resize(224), transforms.CenterCrop(224),
                                     transforms.ToTensor(), normalize])
+
+    mcfg = model_cfg['MODEL']
     if args.inference:
-        infer_dset = DsetSGPairwise(ds, sims, tail_range=model_cfg['MODEL']['TAIL_RANGE'], split='test',
-                                    mode='word')
+        infer_dset = DsetSGPairwise(ds, sims, tail_range=mcfg['TAIL_RANGE'], split='test',
+                                    mode=mcfg['MODE'], sample_mode=mcfg['SAMPLE_MODE'],
+                                    num_steps=mcfg['STEP'], max_num_he=mcfg['NUM_MAX_HE'])
     else:
         if dataset_name == 'vg_coco':
             val_split = 'test'
         else:
             val_split = 'val'
 
-        mcfg = model_cfg['MODEL']
         train_dset = DsetSGPairwise(ds, sims, tail_range=mcfg['TAIL_RANGE'], split='train',
                                     mode=mcfg['MODE'], sample_mode=mcfg['SAMPLE_MODE'],
                                     num_steps=mcfg['STEP'], max_num_he=mcfg['NUM_MAX_HE'])
@@ -240,9 +238,6 @@ def main():
 
         for b_idx, mini_batch in enumerate(tqdm(train_dloader)):
             mini_batch = [m.cuda() for m in mini_batch]
-            # if len(mini_batch[0].shape) == 4:
-            #     mini_batch[0] = mini_batch[0].view(-1, mini_batch[0].shape[2], mini_batch[0].shape[3])
-            #     mini_batch[1] = mini_batch[1].view(-1, mini_batch[1].shape[2], mini_batch[1].shape[3])
             optimizer.zero_grad()
             pred, loss = model(*mini_batch)
 
@@ -253,7 +248,6 @@ def main():
 
             summary.add_scalar('loss/train', loss.item(), num_iter)
             num_iter += 1
-            break
 
         lr_scheduler.step()
 
@@ -271,9 +265,6 @@ def main():
         # validation loss
         for b_idx, mini_batch in enumerate(tqdm(test_dloader)):
             mini_batch = [m.cuda() for m in mini_batch]
-            # if len(mini_batch[0].shape) == 4:
-            #     mini_batch[0] = mini_batch[0].view(-1, mini_batch[0].shape[2], mini_batch[0].shape[3])
-            #     mini_batch[1] = mini_batch[1].view(-1, mini_batch[1].shape[2], mini_batch[1].shape[3])
             pred, loss = model(*mini_batch)
 
             test_loss.append(loss.item())
@@ -287,11 +278,12 @@ def main():
             l_reranked = get_reranked_ids(dataset_name, val_id, n_rerank=100, split=val_split)
 
             l_imgs = Parallel(n_jobs=5, prefer='threads')(delayed(test_dset.get_by_id)(img_id) for img_id in l_reranked)
+            target = concat_data(l_imgs)
             target = torch.stack(l_imgs)
             target = target.cuda()
 
             query = test_dset.get_by_id(val_id)
-            query = query.unsqueeze(0).repeat(len(target), 1, 1)
+            query = repeat_data(query, len(target))
             query = query.cuda()
             with torch.no_grad():
                 score, _ = model.score(query, target)

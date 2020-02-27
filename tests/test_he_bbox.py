@@ -40,6 +40,8 @@ def test_HGAN_bbox(sample_mode):
                      'FEATURE': 'bbox'
                      }}
     model = HGAN(cfg)
-    model.score(anchor, pair)
+    score, att_map = model.score(anchor, pair)
+    print(score)
+    raise ValueError
 
 
