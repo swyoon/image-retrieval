@@ -28,11 +28,14 @@ class HGAN(nn.Module):
         self.nhidden = cfg['MODEL']['NUM_HIDDEN']
         self.nhead = cfg['MODEL']['NUM_HEAD']
         self.a2h = torch.nn.Linear(self.word_emb_size, self.nhidden)
-        self.c2h = torch.nn.Linear(self.word_emb_size, self.nhidden)
+        # self.c2h = torch.nn.Linear(self.word_emb_size, self.nhidden)
 
         self.h2att = torch.nn.Linear(self.nhidden, self.nhead)
         self.softmax_att = torch.nn.Softmax(dim=2)
         self.fc_score = torch.nn.Linear(self.nhidden*self.nhead, 1)
+
+        resnet_feature_dim = 512
+        glove_feature_dim = 300
 
         if self.cfg['MODEL']['TARGET'] == 'SBERT':
             self.loss = nn.MSELoss()
@@ -41,7 +44,7 @@ class HGAN(nn.Module):
             self.loss = TripletLoss(self.margin)
 
         if 'FEATURE' in self.cfg['MODEL']:
-            if self.cfg['MODEL']['FEATURE'] == 'bbox':
+            if self.cfg['MODEL']['FEATURE'] in ('bbox', 'bbox_rel', 'bbox_word'):
                 resnet = resnet18(pretrained=True)
                 feature_part = list(resnet.children())[:-1]
                 net = nn.Sequential(*feature_part)
@@ -51,27 +54,44 @@ class HGAN(nn.Module):
                     for p in self.cnn.parameters():
                         p.requires_grad = False 
 
+            if self.cfg['MODEL']['FEATURE'] in ('bbox_rel', 'bbox_word'):
+                self.embed_bbox = torch.nn.Linear(resnet_feature_dim, self.word_emb_size)
+                self.embed_word = torch.nn.Linear(glove_feature_dim, self.word_emb_size)
+
     def _preprocess(self, x):
         if 'FEATURE' not in self.cfg['MODEL'] or self.cfg['MODEL']['FEATURE'] == 'word':
-            if len(x.shape) == 4:
-                return x.view(-1, *x.shape[2:])
-            else:
-                return x
-
+            return self._word_feature(x)
         if self.cfg['MODEL']['FEATURE'] == 'bbox':
-            in_shape = x.shape
-            if len(in_shape) == 6:
-                x = x.view(-1, *in_shape[3:])
-            mask = x[:, 0, 0, 0] != -100
-            real_x = x[mask]
-            feature = self.cnn(real_x).squeeze(2).squeeze(1)
-            out = torch.zeros(in_shape[0] * in_shape[1] * in_shape[2], feature.shape[1]).to(x.device)
-            out = out.masked_scatter_(mask[:,None], feature)
-            out = out.view(in_shape[0], in_shape[1], in_shape[2], feature.shape[1])
-            num = mask.view(*in_shape[:3]).sum(dim=2).unsqueeze(-1).to(torch.float)
-            num.clamp_(min=1)
-            out = out.sum(dim=2) / num
-            return out
+            return self._bbox_feature(x)
+        elif self.cfg['MODEL']['FEATURE'] in ('bbox_rel', 'bbox_word'):  # bbox with relation word
+            bbox_feature = self._bbox_feature(x['bbox'])
+            word_feature = self._word_feature(x['word'])
+            return self.embed_bbox(bbox_feature) + self.embed_word(word_feature)
+        else:
+            raise ValueError
+
+    def _word_feature(self, x):
+        if len(x.shape) == 4:
+            return x.view(-1, *x.shape[2:])
+        else:
+            return x
+
+    def _bbox_feature(self, x):
+        """x: 6D tensor of bbox images
+        returns averages of resnet vectors"""
+        in_shape = x.shape
+        if len(in_shape) == 6:
+            x = x.view(-1, *in_shape[3:])
+        mask = x[:, 0, 0, 0] != -100
+        real_x = x[mask]
+        feature = self.cnn(real_x).squeeze(2).squeeze(1)
+        out = torch.zeros(in_shape[0] * in_shape[1] * in_shape[2], feature.shape[1]).to(x.device)
+        out = out.masked_scatter_(mask[:, None], feature)
+        out = out.view(in_shape[0], in_shape[1], in_shape[2], feature.shape[1])
+        num = mask.view(*in_shape[:3]).sum(dim=2).unsqueeze(-1).to(torch.float)
+        num.clamp_(min=1)
+        out = out.sum(dim=2) / num
+        return out
 
     def score(self, he_anchor, he_compare):
         he_anchor = self._preprocess(he_anchor)
@@ -81,7 +101,8 @@ class HGAN(nn.Module):
 
 
         he_anchor = self.a2h(he_anchor)
-        he_compare = self.c2h(he_compare)
+        # he_compare = self.c2h(he_compare)
+        he_compare = self.a2h(he_compare)
 
         he_anchor = he_anchor.permute(0, 2, 1)  # [B, d, #a]
         he_compare = he_compare.permute(0, 2, 1)  # [B, d, #p]

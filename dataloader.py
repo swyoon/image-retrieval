@@ -51,9 +51,12 @@ def he_sampling(adj, word_vec, num_steps, max_num_he, mode, eps_prob=0.001, word
         return he_emb, np.array(HEs)
 
 
-def he_sampling_v2(adj, num_steps, max_num_he, eps_prob=0.001):
+def he_sampling_v2(adj, num_steps, max_num_he, eps_prob=0.):
     """returns node indices of sampled hyperedge"""
     n_nodes = adj.shape[0]
+
+    # binarize adj matrix
+    adj = (adj > 0).astype('float')
 
     num_outedges = np.sum(adj, axis=1) + 0.5
     init_prob = num_outedges / np.sum(num_outedges, keepdims=True)
@@ -252,7 +255,7 @@ class DsetSGPairwise(Dataset):
         self.bbox_size = bbox_size
         print(f'mode: {mode}, sample_mode: {sample_mode}, num_steps: {num_steps}, max_num_he: {max_num_he}, tail_range: {tail_range}, bbox_size: {bbox_size}')
 
-        if self.mode == 'fixedbbox':
+        if self.mode in ('fixedbbox', 'bbox_rel', 'bbox_word'):
             normalize = TF.Normalize(mean=[0.485, 0.456, 0.406],
                                      std=[0.229, 0.224, 0.225])
             to_tensor = TF.ToTensor()
@@ -333,49 +336,87 @@ class DsetSGPairwise(Dataset):
 
     def node2feature(self, HEs, img_id, sg):
         if self.mode == 'fixedbbox':
-            img = Image.open(self.ds.get_img_path(img_id)).convert('RGB')
-            if 'obj_bboxes' in sg:  # VG-COCO previously generated 
-                bboxes = sg['obj_bboxes']
-                r = 1  # for vg_coco dataset
-            else:
-                bboxes = sg['bboxes']
-                w, h = img.size
-                r = max(w, h) / 1024  # for bbox coordinate matching
-
-            l_features = []
-            for HE in HEs:
-                l_row = [] 
-                for node in HE:
-                    if node < len(bboxes):  # object
-                        new_bb = bboxes[node] * r
-                        crop_img = img.crop(box=new_bb)
-                        bbox_tensor = self.tr(crop_img)
-                        l_row.append(bbox_tensor)
-
-                if len(l_row) == 0:  # no bbox found in this hyperedge
-                    continue
-                row = torch.stack(l_row)
-                row_box = -100 * torch.ones(self.num_steps, 3, self.bbox_size, self.bbox_size)  # at most num_steps - 1 bbox... but it isn't
-                row_box[:len(row)] = row
-                l_features.append(row_box)
-            features = torch.stack(l_features) 
-            out = - 100 * torch.ones(self.max_num_he, self.num_steps, 3, self.bbox_size, self.bbox_size)
-            out[:len(features)] = features
-            return out
+            return self._bbox_feature(HEs, img_id, sg)
         elif self.mode == 'word':
-            l_features = []
-            for HE in HEs:
-                l_row = []
-                for node in HE:
-                    word = sg['node_labels'][node]
-                    l_row.append(torch.tensor(self.ds.word2emb(word), dtype=torch.float))
-                l_features.append(torch.mean(torch.stack(l_row), dim=0))
-            features = torch.stack(l_features)
-            out = torch.zeros(self.max_num_he, features.shape[1])
-            out[:len(features),:] = features
-            return out 
+            return self._word_feature(HEs, img_id, sg)
+        elif self.mode == 'bbox_rel':
+            return {'word': self._word_feature(HEs, img_id, sg, mode='rel'), 'bbox': self._bbox_feature(HEs, img_id, sg)}
+        elif self.mode == 'bbox_word':
+            return {'word': self._word_feature(HEs, img_id, sg, mode='word'), 'bbox': self._bbox_feature(HEs, img_id, sg)}
         else:
             raise ValueError(f'Invalid mode {self.mode}')
+
+    def _bbox_feature(self, HEs, img_id, sg):
+        img = Image.open(self.ds.get_img_path(img_id)).convert('RGB')
+        if 'obj_bboxes' in sg:  # VG-COCO previously generated 
+            bboxes = sg['obj_bboxes']
+            r = 1  # for vg_coco dataset
+        else:
+            bboxes = sg['bboxes']
+            w, h = img.size
+            r = max(w, h) / 1024  # for bbox coordinate matching
+
+        l_features = []
+        for HE in HEs:
+            l_row = [] 
+            for node in HE:
+                if node < len(bboxes):  # object
+                    new_bb = bboxes[node] * r
+                    crop_img = img.crop(box=new_bb)
+                    bbox_tensor = self.tr(crop_img)
+                    l_row.append(bbox_tensor)
+
+            if len(l_row) == 0:  # no bbox found in this hyperedge
+                continue
+            row = torch.stack(l_row)
+            row_box = -100 * torch.ones(self.num_steps, 3, self.bbox_size, self.bbox_size)  # at most num_steps - 1 bbox... but it isn't
+            row_box[:len(row)] = row
+            l_features.append(row_box)
+        features = torch.stack(l_features) 
+        out = - 100 * torch.ones(self.max_num_he, self.num_steps, 3, self.bbox_size, self.bbox_size)
+        out[:len(features)] = features
+        return out
+
+    def _word_feature(self, HEs, img_id, sg, mode='word'):
+        """mode: word -> all words, rel -> only relations"""
+        l_features = []
+        for HE in HEs:
+            l_row = []
+            for node in HE:
+                if mode == 'word':
+                    pass  # include all words
+                elif mode == 'rel':
+                    nodetype = self._node_type(node, sg)
+                    if nodetype != 'rel':
+                        continue
+                else:
+                    raise ValueError(f'Invalid mode {mode}')
+
+                word = sg['node_labels'][node]
+                l_row.append(torch.tensor(self.ds.word2emb(word), dtype=torch.float))
+
+            if len(l_row) == 0:
+                continue
+
+            l_features.append(torch.mean(torch.stack(l_row), dim=0))
+        features = torch.stack(l_features)
+        out = torch.zeros(self.max_num_he, features.shape[1])
+        out[:len(features), :] = features
+        return out 
+
+    def _node_type(self, node_id, sg):
+        if 'obj_bboxes' in sg:  # VG-COCO previously generated
+            if node_id < len(sg['obj_bboxes']):
+                return 'obj'
+            elif len(sg['obj_bboxes']) <= node_id < len(sg['obj_attributes']):
+                return 'attr'
+            else:
+                return 'rel'
+        else:
+            if node_id < len(sg['bboxes']):
+                return 'obj'
+            else:
+                return 'rel'
 
 
 def concat_data(l_x):
@@ -397,6 +438,7 @@ def repeat_data(x, n_repeat):
         out = {}
         for key in x.keys():
             out[key] = torch.stack([x[key]] * n_repeat)
+        return out
 
 
 class Dset_VG_Pairwise(Dataset):

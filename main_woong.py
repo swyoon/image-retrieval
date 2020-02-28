@@ -31,6 +31,25 @@ def split_id(l, split_idx, n_split):
     return l[start:end]
 
 
+def to_cuda(batch):
+    if isinstance(batch, list):
+        l = []
+        for b in batch:
+            if isinstance(b, dict):
+                l.append({key: val.cuda() for key, val in b.items()})
+            elif isinstance(b, torch.Tensor):
+                l.append(b.cuda())
+            else:
+                raise ValueError
+        return l
+    elif isinstance(batch, dict):
+        return {key: val.cuda() for key, val in batch.items()}
+    elif isinstance(batch, torch.Tensor):
+        return batch.cuda()
+    else:
+        raise ValueError
+
+
 def inference(dataset_name, model, infer_dset, args):
     ckpt_path = args.ckpt_path + args.exp_name
     print(f'looking for checkpoints... {ckpt_path}')
@@ -83,12 +102,12 @@ def inference(dataset_name, model, infer_dset, args):
         time_s = time.time()
         l_imgs = Parallel(n_jobs=args.num_workers, prefer='threads')(delayed(infer_dset.get_by_id)(img_id) for img_id in l_reranked)
         target = concat_data(l_imgs)
-        target = target.cuda()
+        target = to_cuda(target)
 
         # get test image
         query = infer_dset.get_by_id(vid)
         query = repeat_data(query, len(target))
-        query = query.cuda()
+        query = to_cuda(query)
 
         # l_score = []
         # for batch in dl:
@@ -240,7 +259,7 @@ def main():
         model.train()
 
         for b_idx, mini_batch in enumerate(tqdm(train_dloader)):
-            mini_batch = [m.cuda() for m in mini_batch]
+            mini_batch = to_cuda(mini_batch)
             optimizer.zero_grad()
             pred, loss = model(*mini_batch)
 
@@ -267,7 +286,7 @@ def main():
         # --------- validation ---------
         # validation loss
         for b_idx, mini_batch in enumerate(tqdm(test_dloader)):
-            mini_batch = [m.cuda() for m in mini_batch]
+            mini_batch = to_cuda(mini_batch)
             pred, loss = model(*mini_batch)
 
             test_loss.append(loss.item())
@@ -282,12 +301,11 @@ def main():
 
             l_imgs = Parallel(n_jobs=5, prefer='threads')(delayed(test_dset.get_by_id)(img_id) for img_id in l_reranked)
             target = concat_data(l_imgs)
-            target = torch.stack(l_imgs)
-            target = target.cuda()
+            target = to_cuda(target)
 
             query = test_dset.get_by_id(val_id)
-            query = repeat_data(query, len(target))
-            query = query.cuda()
+            query = repeat_data(query, len(l_imgs))
+            query = to_cuda(query)
             with torch.no_grad():
                 score, _ = model.score(query, target)
                 score = score.detach().cpu().flatten().tolist()
