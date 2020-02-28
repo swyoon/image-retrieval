@@ -195,7 +195,8 @@ def main():
     if args.inference:
         infer_dset = DsetSGPairwise(ds, sims, tail_range=mcfg['TAIL_RANGE'], split='test',
                                     mode=mcfg['MODE'], sample_mode=mcfg['SAMPLE_MODE'],
-                                    num_steps=mcfg['STEP'], max_num_he=mcfg['NUM_MAX_HE'])
+                                    num_steps=mcfg['STEP'], max_num_he=mcfg['NUM_MAX_HE'],
+                                    bbox_size=mcfg.get('bbox_size', 64))
     else:
         if dataset_name == 'vg_coco':
             val_split = 'test'
@@ -204,12 +205,14 @@ def main():
 
         train_dset = DsetSGPairwise(ds, sims, tail_range=mcfg['TAIL_RANGE'], split='train',
                                     mode=mcfg['MODE'], sample_mode=mcfg['SAMPLE_MODE'],
-                                    num_steps=mcfg['STEP'], max_num_he=mcfg['NUM_MAX_HE'])
+                                    num_steps=mcfg['STEP'], max_num_he=mcfg['NUM_MAX_HE'],
+                                    bbox_size=mcfg.get('bbox_size', 64))
         train_dloader = DataLoader(train_dset, batch_size=mcfg['BATCH_SIZE'], num_workers=args.num_workers,
                                    shuffle=True)
         test_dset = DsetSGPairwise(ds, sims, tail_range=mcfg['TAIL_RANGE'], split=val_split,
                                    mode=mcfg['MODE'], sample_mode=mcfg['SAMPLE_MODE'],
-                                   num_steps=mcfg['STEP'], max_num_he=mcfg['NUM_MAX_HE'])
+                                   num_steps=mcfg['STEP'], max_num_he=mcfg['NUM_MAX_HE'],
+                                   bbox_size=mcfg.get('bbox_size', 64))
         test_dloader = DataLoader(test_dset, batch_size=mcfg['BATCH_SIZE'], num_workers=args.num_workers, shuffle=False)
 
     # ------------ Model -----------------------

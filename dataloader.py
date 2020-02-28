@@ -232,7 +232,8 @@ class DsetImgPairwise(Dataset):
 
 class DsetSGPairwise(Dataset):
     def __init__(self, ds, sims, tail_range, split='train', transforms=None,
-                 mode='word', num_steps=3, max_num_he=100, sample_mode='tail_random'):
+                 mode='word', num_steps=3, max_num_he=100, sample_mode='tail_random',
+                 bbox_size=64):
         self.ds = ds
         assert isinstance(ds, CocoDataset) or isinstance(ds, FlickrDataset) or isinstance(ds, VGDataset),\
                 'Requires dataset object'
@@ -248,13 +249,14 @@ class DsetSGPairwise(Dataset):
         self.sample_mode = sample_mode 
         self.num_steps = num_steps
         self.max_num_he = max_num_he
-        print(f'mode: {mode}, sample_mode: {sample_mode}, num_steps: {num_steps}, max_num_he: {max_num_he}, tail_range: {tail_range}')
+        self.bbox_size = bbox_size
+        print(f'mode: {mode}, sample_mode: {sample_mode}, num_steps: {num_steps}, max_num_he: {max_num_he}, tail_range: {tail_range}, bbox_size: {bbox_size}')
 
         if self.mode == 'fixedbbox':
             normalize = TF.Normalize(mean=[0.485, 0.456, 0.406],
                                      std=[0.229, 0.224, 0.225])
             to_tensor = TF.ToTensor()
-            resize = TF.Resize((64, 64))
+            resize = TF.Resize((bbox_size, bbox_size))
             self.tr = TF.Compose([resize, to_tensor, normalize])
 
     def __len__(self):
@@ -353,11 +355,11 @@ class DsetSGPairwise(Dataset):
                 if len(l_row) == 0:  # no bbox found in this hyperedge
                     continue
                 row = torch.stack(l_row)
-                row_box = -100 * torch.ones(self.num_steps, 3, 64, 64)  # at most num_steps - 1 bbox... but it isn't
+                row_box = -100 * torch.ones(self.num_steps, 3, self.bbox_size, self.bbox_size)  # at most num_steps - 1 bbox... but it isn't
                 row_box[:len(row)] = row
                 l_features.append(row_box)
             features = torch.stack(l_features) 
-            out = - 100 * torch.ones(self.max_num_he, self.num_steps, 3, 64, 64)
+            out = - 100 * torch.ones(self.max_num_he, self.num_steps, 3, self.bbox_size, self.bbox_size)
             out[:len(features)] = features
             return out
         elif self.mode == 'word':
