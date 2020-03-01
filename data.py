@@ -128,6 +128,7 @@ class CocoDataset(data.Dataset):
             vocab: vocabulary wrapper.
             transform: transformer for image.
         """
+        self.name = 'coco'
         self.root = root
         self.img_dir = os.path.join(root, 'images')
         self.ann_dir = os.path.join(root, 'annotations')
@@ -210,6 +211,7 @@ class FlickrDataset(data.Dataset):
     def __init__(self, root='/data/project/rw/CBIR/data/f30k', 
                  vocab_emb=None, vocab2idx=None, idx2vocab=None, transform=None,
                  sg_path=False):
+        self.name = 'f30k'
         self.root = root
         self.img_dir = os.path.join(root, 'images')
         self.transform = transform
@@ -266,6 +268,7 @@ class FlickrDataset(data.Dataset):
 class VGDataset:
     def __init__(self, root='/data/project/rw/CBIR/data/vg_coco',
                  vocab_emb=None, vocab2idx=None, idx2vocab=None, sg_path=False):
+        self.name = 'vg_coco'
         self.root = root
         self.img_dir = os.path.join(root, 'images')
         self.d_split = pickle.load(open('/data/project/rw/CBIR/data/vg_coco/vg_coco_split.pkl', 'rb'))

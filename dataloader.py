@@ -6,7 +6,7 @@ import torchvision.transforms as TF
 from torch.utils.data import Dataset
 import operator
 import os
-from data import CocoDataset, FlickrDataset, VGDataset
+from data import CocoDataset, FlickrDataset, VGDataset, get_reranked_ids
 from PIL import Image
 
 def sampling(prob):
@@ -51,7 +51,7 @@ def he_sampling(adj, word_vec, num_steps, max_num_he, mode, eps_prob=0.001, word
         return he_emb, np.array(HEs)
 
 
-def he_sampling_v2(adj, num_steps, max_num_he, eps_prob=0.):
+def he_sampling_v2(adj, num_steps, max_num_he, eps_prob=0.001):
     """returns node indices of sampled hyperedge"""
     n_nodes = adj.shape[0]
 
@@ -236,7 +236,7 @@ class DsetImgPairwise(Dataset):
 class DsetSGPairwise(Dataset):
     def __init__(self, ds, sims, tail_range, split='train', transforms=None,
                  mode='word', num_steps=3, max_num_he=100, sample_mode='tail_random',
-                 bbox_size=64):
+                 bbox_size=64, n_rerank=200):
         self.ds = ds
         assert isinstance(ds, CocoDataset) or isinstance(ds, FlickrDataset) or isinstance(ds, VGDataset),\
                 'Requires dataset object'
@@ -253,6 +253,7 @@ class DsetSGPairwise(Dataset):
         self.num_steps = num_steps
         self.max_num_he = max_num_he
         self.bbox_size = bbox_size
+        self.n_rerank = n_rerank
         print(f'mode: {mode}, sample_mode: {sample_mode}, num_steps: {num_steps}, max_num_he: {max_num_he}, tail_range: {tail_range}, bbox_size: {bbox_size}')
 
         if self.mode in ('fixedbbox', 'bbox_rel', 'bbox_word'):
@@ -322,6 +323,12 @@ class DsetSGPairwise(Dataset):
                 l_pair_id.append(pair_id)
                 l_score.append(score)
             return l_pair_id, l_score
+        elif self.sample_mode == 'rerank_random':
+            """uniform-randomly select among resnet reranked images"""
+            l_reranked = get_reranked_ids(self.ds.name, img_id, n_rerank=self.n_rerank, split=self.split)
+            pair_id = l_reranked[np.random.randint(len(l_reranked))]
+            score = self.sims.sims[self.sims.id2idx[img_id]][self.sims.id2idx[pair_id]]
+            return pair_id, score
         else:
             raise ValueError(f'Invalid sample mode {self.sample_mode}')
 

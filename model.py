@@ -24,11 +24,13 @@ class HGAN(nn.Module):
         super(HGAN, self).__init__()
 
         self.cfg = cfg
+        self.ver = cfg['MODEL'].get('VER', 1)
         self.word_emb_size = cfg['MODEL']['WORD_EMB_SIZE']
         self.nhidden = cfg['MODEL']['NUM_HIDDEN']
         self.nhead = cfg['MODEL']['NUM_HEAD']
         self.a2h = torch.nn.Linear(self.word_emb_size, self.nhidden)
-        # self.c2h = torch.nn.Linear(self.word_emb_size, self.nhidden)
+        if self.ver == 1:
+            self.c2h = torch.nn.Linear(self.word_emb_size, self.nhidden)
 
         self.h2att = torch.nn.Linear(self.nhidden, self.nhead)
         self.softmax_att = torch.nn.Softmax(dim=2)
@@ -44,7 +46,7 @@ class HGAN(nn.Module):
             self.loss = TripletLoss(self.margin)
 
         if 'FEATURE' in self.cfg['MODEL']:
-            if self.cfg['MODEL']['FEATURE'] in ('bbox', 'bbox_rel', 'bbox_word'):
+            if self.cfg['MODEL']['FEATURE'] in ('bbox', 'bbox_rel', 'bbox_word', 'bbox_rel_cat', 'bbox_word_cat'):
                 resnet = resnet18(pretrained=True)
                 feature_part = list(resnet.children())[:-1]
                 net = nn.Sequential(*feature_part)
@@ -54,7 +56,7 @@ class HGAN(nn.Module):
                     for p in self.cnn.parameters():
                         p.requires_grad = False 
 
-            if self.cfg['MODEL']['FEATURE'] in ('bbox_rel', 'bbox_word'):
+            if self.cfg['MODEL']['FEATURE'] in ('bbox_rel', 'bbox_word', 'bbox_rel_cat', 'bbox_word_cat'):
                 self.embed_bbox = torch.nn.Linear(resnet_feature_dim, self.word_emb_size)
                 self.embed_word = torch.nn.Linear(glove_feature_dim, self.word_emb_size)
 
@@ -67,6 +69,10 @@ class HGAN(nn.Module):
             bbox_feature = self._bbox_feature(x['bbox'])
             word_feature = self._word_feature(x['word'])
             return self.embed_bbox(bbox_feature) + self.embed_word(word_feature)
+        elif self.cfg['MODEL']['FEATURE'] in ('bbox_rel_cat', 'bbox_word_cat'):  # bbox with relation word
+            bbox_feature = self._bbox_feature(x['bbox'])
+            word_feature = self._word_feature(x['word'])
+            return torch.cat([self.embed_bbox(bbox_feature), self.embed_word(word_feature)], dim=1)
         else:
             raise ValueError
 
@@ -101,8 +107,10 @@ class HGAN(nn.Module):
 
 
         he_anchor = self.a2h(he_anchor)
-        # he_compare = self.c2h(he_compare)
-        he_compare = self.a2h(he_compare)
+        if self.ver == 1:
+            he_compare = self.c2h(he_compare)
+        else:
+            he_compare = self.a2h(he_compare)
 
         he_anchor = he_anchor.permute(0, 2, 1)  # [B, d, #a]
         he_compare = he_compare.permute(0, 2, 1)  # [B, d, #p]

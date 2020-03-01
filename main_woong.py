@@ -106,7 +106,7 @@ def inference(dataset_name, model, infer_dset, args):
 
         # get test image
         query = infer_dset.get_by_id(vid)
-        query = repeat_data(query, len(target))
+        query = repeat_data(query, len(l_imgs))
         query = to_cuda(query)
 
         # l_score = []
@@ -191,14 +191,23 @@ def main():
         sim_id_file = '/data/project/rw/CBIR/data/vg_coco/vg_coco_sbert_img_id.npy'
         if model_cfg['DATASET']['TYPE'] == 'GT':
             sg_path = '/data/project/rw/CBIR/data/vg_coco/vg_coco_gt_sg.pkl'
-            vocab_emb_path = '/data/project/rw/CBIR/data/vg_coco/glove_embs_vg_coco_sg.pkl' 
-            vocab2idx_path = '/data/project/rw/CBIR/data/vg_coco/vocab2idx_vg_coco_sg.pkl' 
-            idx2vocab_path = '/data/project/rw/CBIR/data/vg_coco/idx2vocab_vg_coco_sg.pkl'
         elif model_cfg['DATASET']['TYPE'] == 'gen':
             sg_path = '/data/project/rw/CBIR/data/vg_coco/vg_coco_sgg.pkl'
-            vocab_emb_path = '/data/project/rw/CBIR/data/vg_coco/glove_embs_vg_coco_sg_butd.pkl' 
-            vocab2idx_path = '/data/project/rw/CBIR/data/vg_coco/vocab2idx_vg_coco_sg_butd.pkl' 
-            idx2vocab_path = '/data/project/rw/CBIR/data/vg_coco/idx2vocab_vg_coco_sg_butd.pkl'
+        elif model_cfg['DATASET']['TYPE'] == 'noatt':
+            sg_path = '/data/project/rw/CBIR/data/vg_coco/vg_coco_sgg_noatt.pkl'
+        elif model_cfg['DATASET']['TYPE'] == 'norel':
+            sg_path = '/data/project/rw/CBIR/data/vg_coco/vg_coco_sgg_norel.pkl'
+        elif model_cfg['DATASET']['TYPE'] == 'norelsym':
+            sg_path = '/data/project/rw/CBIR/data/vg_coco/vg_coco_sgg_norelsym.pkl'
+        elif model_cfg['DATASET']['TYPE'] == 'randrel':
+            sg_path = '/data/project/rw/CBIR/data/vg_coco/vg_coco_sgg_randrel.pkl'
+        elif model_cfg['DATASET']['TYPE'] == 'obj':
+            sg_path = '/data/project/rw/CBIR/data/vg_coco/vg_coco_sgg_obj.pkl'
+
+        vocab_emb_path = '/data/project/rw/CBIR/data/vg_coco/glove_embs_vg_coco_sg_butd.pkl' 
+        vocab2idx_path = '/data/project/rw/CBIR/data/vg_coco/vocab2idx_vg_coco_sg_butd.pkl' 
+        idx2vocab_path = '/data/project/rw/CBIR/data/vg_coco/idx2vocab_vg_coco_sg_butd.pkl'
+
         sims = BERTSimilarity(sim_mat_file, sim_id_file)
         ds = VGDataset(vocab_emb=vocab_emb_path, vocab2idx=vocab2idx_path, idx2vocab=idx2vocab_path,
                        sg_path=sg_path)

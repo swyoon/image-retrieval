@@ -5,7 +5,7 @@ from model import HGAN
 from torch.utils.data import DataLoader
 
 
-@pytest.mark.parametrize('sample_mode', ['tail_random'])
+@pytest.mark.parametrize('sample_mode', ['tail_random', 'rerank_random'])
 def test_HGAN_bbox(sample_mode):
     sim_mat_file = '/data/project/rw/CBIR/data/f30k/f30k_sbert_mean.npy'
     sim_id_file = '/data/project/rw/CBIR/data/f30k/f30k_sbert_img_id.npy'
@@ -24,7 +24,7 @@ def test_HGAN_bbox(sample_mode):
                                shuffle=True)
 
     batch = next(iter(train_dloader))
-    if sample_mode == 'tail_random':
+    if sample_mode in ('tail_random', 'rerank_random'):
         anchor, pair, score = batch
         assert anchor.shape == (2, 100, 3, 3, 64, 64)
         assert pair.shape == (2, 100, 3, 3, 64, 64)

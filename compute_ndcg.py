@@ -219,12 +219,13 @@ if __name__ == '__main__':
         df_pred_sim.columns = ['img_id', 'sim']
         df_pred_sim = df_pred_sim.set_index('img_id')
 
+        # ----- reranking
         # print(len(df_pred_sim))
         l_reranked = get_reranked_ids(args.dataset, query_id)
         df_pred_sim = df_pred_sim.loc[l_reranked]
         # print(len(df_pred_sim))
 
-        # df_pred_sim = df_pred_sim.drop(index=df_pred_sim.index[df_pred_sim[0]==int(query_id)])  # drop self
+        # df_pred_sim = df_pred_sim.drop(index=df_pred_sim.index[df_pred_sim.index==int(query_id)])  # drop self
         l_candidate_id = list(df_pred_sim.index)
 
         true_sim = torch.tensor([sbert_sim.get_similarity(query_id, img_id) for img_id in l_candidate_id]).view(1, -1).to(dtype=torch.float)
