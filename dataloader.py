@@ -236,7 +236,7 @@ class DsetImgPairwise(Dataset):
 class DsetSGPairwise(Dataset):
     def __init__(self, ds, sims, tail_range, split='train', transforms=None,
                  mode='word', num_steps=3, max_num_he=100, sample_mode='tail_random',
-                 bbox_size=64, n_rerank=200):
+                 bbox_size=64, n_rerank=200, pos_k=None):
         self.ds = ds
         assert isinstance(ds, CocoDataset) or isinstance(ds, FlickrDataset) or isinstance(ds, VGDataset),\
                 'Requires dataset object'
@@ -254,6 +254,7 @@ class DsetSGPairwise(Dataset):
         self.max_num_he = max_num_he
         self.bbox_size = bbox_size
         self.n_rerank = n_rerank
+        self.pos_k = pos_k
         print(f'mode: {mode}, sample_mode: {sample_mode}, num_steps: {num_steps}, max_num_he: {max_num_he}, tail_range: {tail_range}, bbox_size: {bbox_size}')
 
         if self.mode in ('fixedbbox', 'bbox_rel', 'bbox_word'):
@@ -272,13 +273,19 @@ class DsetSGPairwise(Dataset):
     def __getitem__(self, idx):
         img_id = self.l_id[idx]
         anchor_data = self.get_by_id(img_id)
-        pair_id, score = self.sample_pair(img_id)
         if self.sample_mode == 'tmb':
-            l_pair_data = [self.get_by_id(pid) for pid in pair_id]
+            l_pair_id, score = self.sample_pair(img_id)
+            l_pair_data = [self.get_by_id(pid) for pid in l_pair_id]
             pair_data = concat_data(l_pair_data)
             anchor_data = repeat_data(anchor_data, len(pair_data))
             return anchor_data, pair_data, torch.tensor(score, dtype=torch.float)
+        elif self.sample_mode in ('tripletV1', 'rankV1'):
+            pos_id, neg_id = self.sample_triplet(img_id)
+            pos_data = self.get_by_id(pos_id)
+            neg_data = self.get_by_id(neg_id)
+            return anchor_data, pos_data, neg_data
         else:
+            pair_id, score = self.sample_pair(img_id)
             pair_data = self.get_by_id(pair_id)
             return anchor_data, pair_data, score
 
@@ -331,6 +338,30 @@ class DsetSGPairwise(Dataset):
             return pair_id, score
         else:
             raise ValueError(f'Invalid sample mode {self.sample_mode}')
+
+    def sample_triplet(self, img_id):
+        if self.sample_mode == 'tripletV1':
+            l_reranked = get_reranked_ids(self.ds.name, img_id, n_rerank=self.n_rerank, split=self.split)
+            # compute score
+            l_score = [self.sims.get_similarity(img_id, id_) for id_ in l_reranked]
+            # sort by score
+            sort_idx = np.argsort(l_score)[::-1]
+            # select top as pos
+            pos_id = l_reranked[sort_idx[np.random.randint(self.pos_k)]]
+            neg_id = l_reranked[sort_idx[np.random.randint(low=self.pos_k, high=len(l_reranked))]]
+            # select bottom as neg
+            return pos_id, neg_id
+        elif self.sample_mode == 'rankV1':
+            l_reranked = get_reranked_ids(self.ds.name, img_id, n_rerank=self.n_rerank, split=self.split)
+            id1, id2 = np.random.choice(l_reranked, size=(2,), replace=False)
+            sim1 = self.sims.get_similarity(img_id, id1)
+            sim2 = self.sims.get_similarity(img_id, id2)
+            if sim1 >= sim2:
+                return id1, id2  # (pos_id, neg_id)
+            else:
+                return id2, id1  # (pos_id, neg_id)
+        else:
+            raise ValueError
 
     def get_by_id(self, img_id):
         # get scene graph

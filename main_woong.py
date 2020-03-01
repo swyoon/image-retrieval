@@ -137,7 +137,6 @@ def main():
 
     parser.add_argument("--config_file", default="configs/han_sbert_tail_sampling_he_step_3.yaml")
     parser.add_argument("--exp_name", default="han_sbert_tail_6_in_100_HE_100_3")
-    parser.add_argument("--trg_opt", type=str, default='SBERT')
     parser.add_argument("--resume", type=int, default=0)
     parser.add_argument("--inference", action='store_true')
     parser.add_argument("--json", action='store_true', help='run inference on test_id_1000_v3.json file')
@@ -148,6 +147,7 @@ def main():
     parser.add_argument("--ckpt_path", type=str, default='/data/project/rw/woong.ssang/CBIR/ckpt/')
     parser.add_argument("--split_idx", type=int, default=None)
     parser.add_argument("--n_split", type=int, default=None)
+    parser.add_argument("--test", action='store_true', help='for unitting the script')
     args = parser.parse_args()
     print(args)
 
@@ -224,7 +224,8 @@ def main():
         infer_dset = DsetSGPairwise(ds, sims, tail_range=mcfg['TAIL_RANGE'], split='test',
                                     mode=mcfg['MODE'], sample_mode=mcfg['SAMPLE_MODE'],
                                     num_steps=mcfg['STEP'], max_num_he=mcfg['NUM_MAX_HE'],
-                                    bbox_size=mcfg.get('bbox_size', 64))
+                                    bbox_size=mcfg.get('bbox_size', 64),
+                                    pos_k=mcfg.get('POS_K', None))
     else:
         if dataset_name == 'vg_coco':
             val_split = 'test'
@@ -234,13 +235,15 @@ def main():
         train_dset = DsetSGPairwise(ds, sims, tail_range=mcfg['TAIL_RANGE'], split='train',
                                     mode=mcfg['MODE'], sample_mode=mcfg['SAMPLE_MODE'],
                                     num_steps=mcfg['STEP'], max_num_he=mcfg['NUM_MAX_HE'],
-                                    bbox_size=mcfg.get('bbox_size', 64))
+                                    bbox_size=mcfg.get('bbox_size', 64),
+                                    pos_k=mcfg.get('POS_K', None))
         train_dloader = DataLoader(train_dset, batch_size=mcfg['BATCH_SIZE'], num_workers=args.num_workers,
                                    shuffle=True)
         test_dset = DsetSGPairwise(ds, sims, tail_range=mcfg['TAIL_RANGE'], split=val_split,
                                    mode=mcfg['MODE'], sample_mode=mcfg['SAMPLE_MODE'],
                                    num_steps=mcfg['STEP'], max_num_he=mcfg['NUM_MAX_HE'],
-                                   bbox_size=mcfg.get('bbox_size', 64))
+                                   bbox_size=mcfg.get('bbox_size', 64),
+                                   pos_k=mcfg.get('POS_K', None))
         test_dloader = DataLoader(test_dset, batch_size=mcfg['BATCH_SIZE'], num_workers=args.num_workers, shuffle=False)
 
     # ------------ Model -----------------------
@@ -280,6 +283,9 @@ def main():
             summary.add_scalar('loss/train', loss.item(), num_iter)
             num_iter += 1
 
+            if args.test:
+                break
+
         lr_scheduler.step()
 
         torch.save({'idx_epoch': idx_epoch,
@@ -301,6 +307,8 @@ def main():
             test_loss.append(loss.item())
             summary.add_scalar('loss/test', loss.item(), num_iter_test)
             num_iter_test += 1
+            if args.test:
+                break
 
         # validation ndcg
         l_pred = []
@@ -321,6 +329,8 @@ def main():
             l_rel = [sims.get_similarity(val_id, id_) for id_ in l_reranked]
             l_pred.append(score)
             l_true_rel.append(l_rel)
+            if args.test:
+                break
         l_true_rel = torch.tensor(l_true_rel, dtype=torch.float)
         l_pred = torch.tensor(l_pred, dtype=torch.float)
         val_ndcg = ndcg_batch(l_pred, l_true_rel, ks=ks)

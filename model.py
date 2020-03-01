@@ -25,6 +25,7 @@ class HGAN(nn.Module):
 
         self.cfg = cfg
         self.ver = cfg['MODEL'].get('VER', 1)
+        self.out_activation = cfg['MODEL'].get('OUTACT', 'linear')
         self.word_emb_size = cfg['MODEL']['WORD_EMB_SIZE']
         self.nhidden = cfg['MODEL']['NUM_HIDDEN']
         self.nhead = cfg['MODEL']['NUM_HEAD']
@@ -144,7 +145,8 @@ class HGAN(nn.Module):
                 out = torch.cat((out, att_out_sq), dim=1)  # [B, d*h]
 
         score = self.fc_score(out)
-        #score = F.relu(score)
+        if self.out_activation == 'sigmoid':
+            score = F.sigmoid(score)
         return score, att_map
 
     def forward(self, he_anchor, he_pos, he_neg, mode='train', **kwargs):
@@ -164,7 +166,8 @@ class HGAN(nn.Module):
 
             loss = self.loss(score_p, score_n)
 
-            return score_p, score_n, loss
+            # return score_p, score_n, loss
+            return None, loss
 
 
 class HGAN_AUX(HGAN):
