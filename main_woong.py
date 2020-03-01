@@ -9,7 +9,7 @@ from dataloader import Dset_VG, Dset_VG_inference, Dset_VG_Pairwise, get_word_ve
                        DsetImgPairwise, DsetSGPairwise, repeat_data, concat_data
 from torch.utils.data import DataLoader
 from torchvision import transforms
-from model import HGAN
+from model import HGAN, GraphEmbedding
 import time
 from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
@@ -238,16 +238,21 @@ def main():
                                     bbox_size=mcfg.get('bbox_size', 64),
                                     pos_k=mcfg.get('POS_K', None))
         train_dloader = DataLoader(train_dset, batch_size=mcfg['BATCH_SIZE'], num_workers=args.num_workers,
-                                   shuffle=True)
+                                   shuffle=True, collate_fn=concat_data)
         test_dset = DsetSGPairwise(ds, sims, tail_range=mcfg['TAIL_RANGE'], split=val_split,
                                    mode=mcfg['MODE'], sample_mode=mcfg['SAMPLE_MODE'],
                                    num_steps=mcfg['STEP'], max_num_he=mcfg['NUM_MAX_HE'],
                                    bbox_size=mcfg.get('bbox_size', 64),
                                    pos_k=mcfg.get('POS_K', None))
-        test_dloader = DataLoader(test_dset, batch_size=mcfg['BATCH_SIZE'], num_workers=args.num_workers, shuffle=False)
+        test_dloader = DataLoader(test_dset, batch_size=mcfg['BATCH_SIZE'], num_workers=args.num_workers, shuffle=False,
+                                  collate_fn=concat_data)
 
     # ------------ Model -----------------------
-    model = HGAN(model_cfg)
+    if mcfg.get('NAME', 'GraphEmbedding') == 'GraphEmbedding':
+        model = GraphEmbedding(model_cfg)
+    else:
+        print('model: HAN')
+        model = HGAN(model_cfg)
     model.cuda()
 
     optimizer = optim.Adam(model.parameters(), lr=model_cfg['MODEL']['LR'])

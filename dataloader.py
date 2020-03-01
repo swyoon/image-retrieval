@@ -364,13 +364,23 @@ class DsetSGPairwise(Dataset):
             raise ValueError
 
     def get_by_id(self, img_id):
-        # get scene graph
-        anchor_sg = self.ds.imgid2sg(img_id)
-        # sample hyperedge
-        anchor_he = he_sampling_v2(anchor_sg['adj'], self.num_steps, self.max_num_he)
-        # vocab 2 idx
-        anchor_data = self.node2feature(anchor_he, img_id, anchor_sg)
-        return anchor_data
+        if self.mode == 'adj':
+            anchor_sg = self.ds.imgid2sg(img_id)
+            X = torch.tensor([self.ds.word2emb(w) for w in anchor_sg['node_labels']], dtype=torch.float)
+            adj = torch.tensor(anchor_sg['adj'], dtype=torch.float)
+            # binarize and symmetrize
+            adj = ((adj + adj.T) > 0).to(torch.float)
+            return {'adj': adj,
+                    'x': X,
+                    'n_node': torch.tensor([len(X)])}
+        else:
+            # get scene graph
+            anchor_sg = self.ds.imgid2sg(img_id)
+            # sample hyperedge
+            anchor_he = he_sampling_v2(anchor_sg['adj'], self.num_steps, self.max_num_he)
+            # vocab 2 idx
+            anchor_data = self.node2feature(anchor_he, img_id, anchor_sg)
+            return anchor_data
 
     def node2feature(self, HEs, img_id, sg):
         if self.mode == 'fixedbbox':
@@ -463,10 +473,23 @@ def concat_data(l_x):
     elif isinstance(l_x[0], dict):
         out = {}
         for key in l_x[0].keys():
-            out[key] = torch.stack([x[key] for x in l_x])
+            l_data = [x[key] for x in l_x]
+            if len(set([d.shape for d in l_data])) == 1:
+                out[key] = torch.stack(l_data)
+            else:
+                # assume tensors are 2-dimensional : Adj mats, Feature mats
+                D1 = max([x.shape[0] for x in l_data])
+                D2 = max([x.shape[1] for x in l_data])
+                A = torch.zeros(len(l_data), D1, D2)
+                for i, x in enumerate(l_data):
+                    A[i, :x.shape[0], :x.shape[1]] = x
+                out[key] = A
         return out
+    elif isinstance(l_x[0], tuple):
+        return [ concat_data([x[i] for x in l_x]) for i in range(len(l_x[0]))]
     else:
-        raise ValueError
+        return torch.tensor(l_x)
+
 
 
 def repeat_data(x, n_repeat):

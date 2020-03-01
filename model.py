@@ -4,6 +4,7 @@ import torch.nn.functional as F
 import torchvision
 import numpy as np
 from torchvision.models import resnet18
+import torch_geometric.nn as gnn
 
 class TripletLoss(nn.Module):
     """
@@ -321,3 +322,62 @@ class DeepMetric(nn.Module):
 
 
 
+class GraphEmbedding(nn.Module):
+    """Graph (node) embedding algorithms for baseline"""
+    def __init__(self, cfg):
+        super().__init__()
+        self.cfg = cfg
+        self.algo = cfg['MODEL'].get('ALGO', 'GCN')
+        # self.out_activation = cfg['MODEL'].get('OUTACT', 'linear')
+        self.word_emb_size = cfg['MODEL']['WORD_EMB_SIZE']
+        self.n_hidden = cfg['MODEL']['NUM_HIDDEN']
+        if self.cfg['MODEL']['TARGET'] == 'SBERT':
+            self.loss = nn.MSELoss()
+        else:
+            self.margin = cfg['MODEL']['LOSS_MARGIN']
+            self.loss = TripletLoss(self.margin)
+
+        if self.algo == 'GCN':
+            self.conv1 = gnn.DenseGCNConv(self.word_emb_size, self.n_hidden)
+            self.conv2 = gnn.DenseGCNConv(self.n_hidden, self.n_hidden)
+            self.conv3 = gnn.DenseGCNConv(self.n_hidden, self.n_hidden)
+        else:
+            raise ValueError
+
+    def _embed(self, graph):
+        x = graph['x']
+        adj = graph['adj']
+        num_node = graph['n_node'].flatten()
+        if self.algo == 'GCN':
+            # adj = ((adj + adj.T) > 0).to(torch.float)  # symmetrize and binarize
+            h = self.conv1(x, adj)
+            h = F.relu(h)
+            h = self.conv2(h, adj)
+            h = F.relu(h)
+            h = self.conv3(h, adj)
+            h = h.sum(dim=1) / num_node[:,None].to(torch.float)  # average pooling
+            h = h/ h.norm(dim=1, keepdim=True)
+            return h
+
+    def score(self, data1, data2, **kwargs):
+        emb1 = self._embed(data1)
+        emb2 = self._embed(data2)
+        score = (emb1 * emb2).sum(dim=1)
+
+        return score, None  # (score, attmap)
+
+    def forward(self, anchor, pos, neg):
+        if self.cfg['MODEL']['TARGET'] == 'SBERT':
+            # neg is sbert score
+            score_bert = neg
+            score, _ = self.score(anchor, pos)
+            loss = self.loss(score, score_bert)
+            return None, loss
+        else:
+            emb_anchor = self._embed(anchor)
+            emb_pos = self._embed(pos)
+            emb_neg = self._embed(neg)
+            score_p = (emb_anchor * emb_pos).sum(dim=1)
+            score_n = (emb_anchor * emb_neg).sum(dim=1)
+            loss = self.loss(score_p, score_n)
+            return None, loss  # (score, loss)
