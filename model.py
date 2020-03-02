@@ -321,6 +321,12 @@ class DeepMetric(nn.Module):
             return F.relu(- sim1 + sim2 + self.margin).mean()
 
 
+def get_mlp(in_dim, h_dim, out_dim):
+    net = nn.Sequential(nn.Linear(in_dim, h_dim),
+                        nn.ReLU(),
+                        nn.Linear(h_dim, out_dim))
+    return net
+
 
 class GraphEmbedding(nn.Module):
     """Graph (node) embedding algorithms for baseline"""
@@ -337,10 +343,23 @@ class GraphEmbedding(nn.Module):
             self.margin = cfg['MODEL']['LOSS_MARGIN']
             self.loss = TripletLoss(self.margin)
 
-        if self.algo == 'GCN':
+        if self.algo in ('GCN', 'GCN1', 'GCN2', 'GCN3'):
             self.conv1 = gnn.DenseGCNConv(self.word_emb_size, self.n_hidden)
             self.conv2 = gnn.DenseGCNConv(self.n_hidden, self.n_hidden)
             self.conv3 = gnn.DenseGCNConv(self.n_hidden, self.n_hidden)
+        elif self.algo in ('GCN4', ):
+            self.conv1 = gnn.DenseGCNConv(self.word_emb_size, self.n_hidden)
+            self.conv2 = gnn.DenseGCNConv(self.n_hidden, self.n_hidden)
+            self.conv3 = gnn.DenseGCNConv(self.n_hidden, self.n_hidden)
+            self.conv4 = gnn.DenseGCNConv(self.n_hidden, self.n_hidden)
+        elif self.algo in ('GIN'):
+            self.mlp_hidden = cfg['MODEL']['MLP_HIDDEN']
+            self.nn1 = get_mlp(self.word_emb_size, self.mlp_hidden, self.n_hidden)
+            self.nn2 = get_mlp(self.n_hidden, self.mlp_hidden, self.n_hidden)
+            self.nn3 = get_mlp(self.n_hidden, self.mlp_hidden, self.n_hidden)
+            self.conv1 = gnn.DenseGINConv(self.nn1)
+            self.conv2 = gnn.DenseGINConv(self.nn2)
+            self.conv3 = gnn.DenseGINConv(self.nn3)
         else:
             raise ValueError
 
@@ -348,15 +367,46 @@ class GraphEmbedding(nn.Module):
         x = graph['x']
         adj = graph['adj']
         num_node = graph['n_node'].flatten()
-        if self.algo == 'GCN':
-            # adj = ((adj + adj.T) > 0).to(torch.float)  # symmetrize and binarize
+        if self.algo == 'GCN' or self.algo == 'GCN3':
             h = self.conv1(x, adj)
             h = F.relu(h)
             h = self.conv2(h, adj)
             h = F.relu(h)
             h = self.conv3(h, adj)
             h = h.sum(dim=1) / num_node[:,None].to(torch.float)  # average pooling
-            h = h/ h.norm(dim=1, keepdim=True)
+            h = h / h.norm(dim=1, keepdim=True)
+            return h
+        elif self.algo == 'GCN1':
+            h = self.conv1(x, adj)
+            h = h.sum(dim=1) / num_node[:,None].to(torch.float)  # average pooling
+            h = h / h.norm(dim=1, keepdim=True)
+            return h
+        elif self.algo == 'GCN2':
+            h = self.conv1(x, adj)
+            h = F.relu(h)
+            h = self.conv2(h, adj)
+            h = h.sum(dim=1) / num_node[:,None].to(torch.float)  # average pooling
+            h = h / h.norm(dim=1, keepdim=True)
+            return h
+        elif self.algo == 'GCN4':
+            h = self.conv1(x, adj)
+            h = F.relu(h)
+            h = self.conv2(h, adj)
+            h = F.relu(h)
+            h = self.conv3(h, adj)
+            h = F.relu(h)
+            h = self.conv4(h, adj)
+            h = h.sum(dim=1) / num_node[:,None].to(torch.float)  # average pooling
+            h = h / h.norm(dim=1, keepdim=True)
+            return h
+        elif self.algo == 'GIN':
+            h = self.conv1(x, adj)
+            h = F.relu(h)
+            h = self.conv2(h, adj)
+            h = F.relu(h)
+            h = self.conv3(h, adj)
+            h = h.sum(dim=1) / num_node[:,None].to(torch.float)  # average pooling
+            h = h / h.norm(dim=1, keepdim=True)
             return h
 
     def score(self, data1, data2, **kwargs):

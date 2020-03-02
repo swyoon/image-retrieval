@@ -178,7 +178,10 @@ def main():
     elif dataset_name == 'f30k':
         sim_mat_file = '/data/project/rw/CBIR/data/f30k/f30k_sbert_mean.npy'
         sim_id_file = '/data/project/rw/CBIR/data/f30k/f30k_sbert_img_id.npy'
-        sg_path = '/data/project/rw/CBIR/data/f30k/f30k_sgg_freq_prior_with_adj.pkl'
+        if model_cfg['DATASET']['TYPE'] == 'gen':
+            sg_path = '/data/project/rw/CBIR/data/f30k/f30k_sgg_freq_prior_with_adj.pkl'
+        elif model_cfg['DATASET']['TYPE'] == 'grcnn':
+            sg_path = '/data/project/rw/CBIR/data/f30k/f30k_sgg_grcnn_with_adj.pkl'
         vocab_emb_path = '/data/project/rw/CBIR/data/f30k/glove_embs_f30k_sgg_freq_prior.pkl' 
         vocab2idx_path = '/data/project/rw/CBIR/data/f30k/vocab2idx_f30k_sgg_freq_prior.pkl' 
         idx2vocab_path = '/data/project/rw/CBIR/data/f30k/idx2vocab_f30k_sgg_freq_prior.pkl'
@@ -248,7 +251,8 @@ def main():
                                   collate_fn=concat_data)
 
     # ------------ Model -----------------------
-    if mcfg.get('NAME', 'GraphEmbedding') == 'GraphEmbedding':
+    model_name = mcfg.get('NAME', 'HAN')
+    if model_name == 'GraphEmbedding':
         model = GraphEmbedding(model_cfg)
     else:
         print('model: HAN')
