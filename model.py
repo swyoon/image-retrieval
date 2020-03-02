@@ -62,6 +62,9 @@ class HGAN(nn.Module):
                 self.embed_bbox = torch.nn.Linear(resnet_feature_dim, self.word_emb_size)
                 self.embed_word = torch.nn.Linear(glove_feature_dim, self.word_emb_size)
 
+            if self.cfg['MODEL']['FEATURE'] == 'adj_he':
+                self.gcn = gnn.DenseGCNConv(self.word_emb_size, self.word_emb_size)
+
     def _preprocess(self, x):
         if 'FEATURE' not in self.cfg['MODEL'] or self.cfg['MODEL']['FEATURE'] == 'word':
             return self._word_feature(x)
@@ -75,6 +78,27 @@ class HGAN(nn.Module):
             bbox_feature = self._bbox_feature(x['bbox'])
             word_feature = self._word_feature(x['word'])
             return torch.cat([self.embed_bbox(bbox_feature), self.embed_word(word_feature)], dim=1)
+        elif self.cfg['MODEL']['FEATURE'] == 'adj_he':
+            node_feature = x['x']
+            adj = x['adj']
+            he = x['he']  # Batch x max_HE x step
+            node_x = self.gcn(node_feature, adj)  # Batch x node x feature
+            he = he.unsqueeze(3).repeat(1,1,1,node_x.shape[-1])
+            node_x = node_x.unsqueeze(1).repeat(1,he.shape[1],1,1)
+            # out = torch.zeros(he.shape[0], he.shape[1], node_x.shape[2]).to(node_feature.device)
+            out = torch.gather(node_x, 2, he.clamp(min=0))
+            mask = he >= 0
+            out[mask] = 0
+            return out.sum(2) / mask.sum(2).clamp(min=1.).to(torch.float)
+            # print(out.shape)
+            # for i_batch in range(he.shape[0]):
+            #     for i_he in range(he.shape[1]):
+            #         nodes = he[i_batch, i_he]
+            #         nodes = nodes[nodes >= 0]  # ignore -1 index
+            #         mean_rep = node_x[i_batch, nodes, :].mean(dim=0)
+            #         out[i_batch, i_he] = mean_rep
+            # return out
+
         else:
             raise ValueError
 

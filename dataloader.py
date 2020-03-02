@@ -369,10 +369,30 @@ class DsetSGPairwise(Dataset):
             X = torch.tensor([self.ds.word2emb(w) for w in anchor_sg['node_labels']], dtype=torch.float)
             adj = torch.tensor(anchor_sg['adj'], dtype=torch.float)
             # binarize and symmetrize
-            adj = ((adj + adj.T) > 0).to(torch.float)
-            return {'adj': adj,
+            symadj = ((adj + adj.T) > 0).to(torch.float)
+
+            return {'adj': symadj,
                     'x': X,
                     'n_node': torch.tensor([len(X)])}
+        elif self.mode == 'adj_he':
+            anchor_sg = self.ds.imgid2sg(img_id)
+            X = torch.tensor([self.ds.word2emb(w) for w in anchor_sg['node_labels']], dtype=torch.float)
+            adj = torch.tensor(anchor_sg['adj'], dtype=torch.float)
+            # binarize and symmetrize
+            symadj = ((adj + adj.T) > 0).to(torch.float)
+
+            he = he_sampling_v2(anchor_sg['adj'], self.num_steps, self.max_num_he)
+            # pack hyperedge indices
+            max_len = max([len(hh) for hh in he])
+            he_tensor = - torch.ones(self.max_num_he, self.num_steps, dtype=torch.long)
+            for i, row in enumerate(he):
+                for j, idx in enumerate(row):
+                    he_tensor[i, j] = torch.tensor(idx, dtype=torch.long)
+
+            return {'adj': symadj,
+                    'x': X,
+                    'n_node': torch.tensor([len(X)]),
+                    'he': he_tensor}
         else:
             # get scene graph
             anchor_sg = self.ds.imgid2sg(img_id)
