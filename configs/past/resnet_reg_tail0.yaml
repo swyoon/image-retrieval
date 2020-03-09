@@ -1,0 +1,13 @@
+DATASET:
+  NAME: "f30k"
+MODEL:
+  BATCH_SIZE: 64
+  LR: 0.0001
+  TAIL_RANGE: 0
+  FINETUNE: True
+  NORMALIZE: True 
+  MODE: regression
+  MARGIN: null 
+
+
+

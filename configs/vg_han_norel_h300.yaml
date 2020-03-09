@@ -1,6 +1,6 @@
 DATASET:
   NAME: vg_coco
-  TYPE: gen
+  TYPE: norel 
 MODEL:
   TARGET: SBERT
   VER: 2

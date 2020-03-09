@@ -17,7 +17,7 @@ sys.path.append('../')
 from data import BERTSimilarity, get_karpathy_split_light, FlickrDataset, VGDataset
 
 
-DATASET = 'vg_coco'  # one of ('coco', 'f30k')
+DATASET = 'f30k'  # one of ('coco', 'f30k')
 GENCAP = True
 print('Preparing similarity scores for CBIR web viewer...')
 
@@ -32,9 +32,14 @@ if DATASET == 'coco':
 
 elif DATASET == 'f30k':
     time_s = time()
-    sims = BERTSimilarity('/data/project/rw/CBIR/data/f30k/f30k_sbert_mean.npy',
-                          '/data/project/rw/CBIR/data/f30k/f30k_sbert_img_id.npy')
+    if GENCAP:
+        sims = BERTSimilarity('/data/project/rw/CBIR/data/f30k/f30k_gencap_sbert.npy',
+                              '/data/project/rw/CBIR/data/f30k/f30k_gencap_sbert_img_id.npy')
+    else:
+        sims = BERTSimilarity('/data/project/rw/CBIR/data/f30k/f30k_sbert_mean.npy',
+                              '/data/project/rw/CBIR/data/f30k/f30k_sbert_img_id.npy')
     print(f'Loading SBERT score {time() - time_s:.2f} sec')
+
 
     flickr = FlickrDataset()
     d_split = flickr.d_split

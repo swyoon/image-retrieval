@@ -1,6 +1,6 @@
 DATASET:
   NAME: vg_coco
-  TYPE: gen
+  TYPE: grcnn 
 MODEL:
   TARGET: SBERT
   VER: 2

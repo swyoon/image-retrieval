@@ -9,7 +9,7 @@ from dataloader import Dset_VG, Dset_VG_inference, Dset_VG_Pairwise, get_word_ve
                        DsetImgPairwise, DsetSGPairwise, repeat_data, concat_data
 from torch.utils.data import DataLoader
 from torchvision import transforms
-from model import HGAN, GraphEmbedding
+from model import HGAN, GraphEmbedding, HGAN_V0, HGAN_V2, HGAN_V3, HGAN_V4
 import time
 from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
@@ -148,6 +148,7 @@ def main():
     parser.add_argument("--split_idx", type=int, default=None)
     parser.add_argument("--n_split", type=int, default=None)
     parser.add_argument("--test", action='store_true', help='for unitting the script')
+    parser.add_argument("--infer_batch", action='store_true', help='use minibatch when computing NDCG')
     args = parser.parse_args()
     print(args)
 
@@ -180,11 +181,19 @@ def main():
         sim_id_file = '/data/project/rw/CBIR/data/f30k/f30k_sbert_img_id.npy'
         if model_cfg['DATASET']['TYPE'] == 'gen':
             sg_path = '/data/project/rw/CBIR/data/f30k/f30k_sgg_freq_prior_with_adj.pkl'
+            vocab_emb_path = '/data/project/rw/CBIR/data/f30k/glove_embs_f30k_sgg_freq_prior.pkl' 
+            vocab2idx_path = '/data/project/rw/CBIR/data/f30k/vocab2idx_f30k_sgg_freq_prior.pkl' 
+            idx2vocab_path = '/data/project/rw/CBIR/data/f30k/idx2vocab_f30k_sgg_freq_prior.pkl'
         elif model_cfg['DATASET']['TYPE'] == 'grcnn':
             sg_path = '/data/project/rw/CBIR/data/f30k/f30k_sgg_grcnn_with_adj.pkl'
-        vocab_emb_path = '/data/project/rw/CBIR/data/f30k/glove_embs_f30k_sgg_freq_prior.pkl' 
-        vocab2idx_path = '/data/project/rw/CBIR/data/f30k/vocab2idx_f30k_sgg_freq_prior.pkl' 
-        idx2vocab_path = '/data/project/rw/CBIR/data/f30k/idx2vocab_f30k_sgg_freq_prior.pkl'
+            vocab_emb_path = '/data/project/rw/CBIR/data/f30k/glove_embs_f30k_sgg_freq_prior.pkl' 
+            vocab2idx_path = '/data/project/rw/CBIR/data/f30k/vocab2idx_f30k_sgg_freq_prior.pkl' 
+            idx2vocab_path = '/data/project/rw/CBIR/data/f30k/idx2vocab_f30k_sgg_freq_prior.pkl'
+        elif model_cfg['DATASET']['TYPE'] == 'butd':
+            vocab_emb_path = '/data/project/rw/CBIR/data/f30k/butd_freq_prior_LR/glove_embs_f30k_sgg_butd_freq_prior_LR.pkl'
+            vocab2idx_path = '/data/project/rw/CBIR/data/f30k/butd_freq_prior_LR/vocab2idx_f30k_sgg_butd_freq_prior_LR.pkl'
+            idx2vocab_path = '/data/project/rw/CBIR/data/f30k/butd_freq_prior_LR/idx2vocab_f30k_sgg_butd_freq_prior_LR.pkl'
+            sg_path = '/data/project/rw/CBIR/data/f30k/butd_freq_prior_LR/f30k_sgg_butd_freq_prior_LR_with_adj.pkl'
         sims = BERTSimilarity(sim_mat_file, sim_id_file)
         ds = FlickrDataset(vocab_emb=vocab_emb_path, vocab2idx=vocab2idx_path, idx2vocab=idx2vocab_path,
                            sg_path=sg_path)
@@ -192,8 +201,16 @@ def main():
     elif dataset_name == 'vg_coco':
         sim_mat_file = '/data/project/rw/CBIR/data/vg_coco/vg_coco_sbert_mean.npy'
         sim_id_file = '/data/project/rw/CBIR/data/vg_coco/vg_coco_sbert_img_id.npy'
+
+        # default vocab files
+        vocab_emb_path = '/data/project/rw/CBIR/data/vg_coco/glove_embs_vg_coco_sg_butd.pkl' 
+        vocab2idx_path = '/data/project/rw/CBIR/data/vg_coco/vocab2idx_vg_coco_sg_butd.pkl' 
+        idx2vocab_path = '/data/project/rw/CBIR/data/vg_coco/idx2vocab_vg_coco_sg_butd.pkl'
         if model_cfg['DATASET']['TYPE'] == 'GT':
             sg_path = '/data/project/rw/CBIR/data/vg_coco/vg_coco_gt_sg.pkl'
+            vocab_emb_path = '/data/project/rw/CBIR/data/vg_coco/glove_embs_vg_coco_sg.pkl' 
+            vocab2idx_path = '/data/project/rw/CBIR/data/vg_coco/vocab2idx_vg_coco_sg.pkl' 
+            idx2vocab_path = '/data/project/rw/CBIR/data/vg_coco/idx2vocab_vg_coco_sg.pkl'
         elif model_cfg['DATASET']['TYPE'] == 'gen':
             sg_path = '/data/project/rw/CBIR/data/vg_coco/vg_coco_sgg.pkl'
         elif model_cfg['DATASET']['TYPE'] == 'noatt':
@@ -206,10 +223,16 @@ def main():
             sg_path = '/data/project/rw/CBIR/data/vg_coco/vg_coco_sgg_randrel.pkl'
         elif model_cfg['DATASET']['TYPE'] == 'obj':
             sg_path = '/data/project/rw/CBIR/data/vg_coco/vg_coco_sgg_obj.pkl'
+        elif model_cfg['DATASET']['TYPE'] == 'grcnn':
+            sg_path = '/data/project/rw/CBIR/data/vg_coco/sgg_grcnn/vgcoco_sgg_grcnn_with_adj.pkl'
+            vocab_emb_path = '/data/project/rw/CBIR/data/vg_coco/sgg_grcnn/glove_embs_vgcoco_sgg_grcnn.pkl' 
+            vocab2idx_path = '/data/project/rw/CBIR/data/vg_coco/sgg_grcnn/vocab2idx_vgcoco_sgg_grcnn.pkl' 
+            idx2vocab_path = '/data/project/rw/CBIR/data/vg_coco/sgg_grcnn/idx2vocab_vgcoco_sgg_grcnn.pkl'
 
-        vocab_emb_path = '/data/project/rw/CBIR/data/vg_coco/glove_embs_vg_coco_sg_butd.pkl' 
-        vocab2idx_path = '/data/project/rw/CBIR/data/vg_coco/vocab2idx_vg_coco_sg_butd.pkl' 
-        idx2vocab_path = '/data/project/rw/CBIR/data/vg_coco/idx2vocab_vg_coco_sg_butd.pkl'
+        print(f'scene graph file: {sg_path}')
+        print(f'vocab embedding: {vocab_emb_path}')
+        print(f'vocab2idx : {vocab2idx_path}')
+        print(f'idx2vocab : {idx2vocab_path}')
 
         sims = BERTSimilarity(sim_mat_file, sim_id_file)
         ds = VGDataset(vocab_emb=vocab_emb_path, vocab2idx=vocab2idx_path, idx2vocab=idx2vocab_path,
@@ -254,6 +277,14 @@ def main():
     model_name = mcfg.get('NAME', 'HAN')
     if model_name == 'GraphEmbedding':
         model = GraphEmbedding(model_cfg)
+    elif model_name == 'HGAN_V0':
+        model = HGAN_V0(model_cfg)
+    elif model_name == 'HGAN_V2':
+        model = HGAN_V2(model_cfg)
+    elif model_name == 'HGAN_V3':
+        model = HGAN_V3(model_cfg)
+    elif model_name == 'HGAN_V4':
+        model = HGAN_V4(model_cfg)
     else:
         print('model: HAN')
         model = HGAN(model_cfg)
@@ -308,33 +339,53 @@ def main():
         model.eval()
 
         # --------- validation ---------
-        # validation loss
-        for b_idx, mini_batch in enumerate(tqdm(test_dloader)):
-            mini_batch = to_cuda(mini_batch)
-            pred, loss = model(*mini_batch)
+        # # validation loss
+        # for b_idx, mini_batch in enumerate(tqdm(test_dloader)):
+        #     mini_batch = to_cuda(mini_batch)
+        #     pred, loss = model(*mini_batch)
 
-            test_loss.append(loss.item())
-            summary.add_scalar('loss/test', loss.item(), num_iter_test)
-            num_iter_test += 1
-            if args.test:
-                break
+        #     test_loss.append(loss.item())
+        #     summary.add_scalar('loss/test', loss.item(), num_iter_test)
+        #     num_iter_test += 1
+        #     if args.test:
+        #         break
 
         # validation ndcg
         l_pred = []
         l_true_rel = []
         for val_id in tqdm(l_val_ids):
             l_reranked = get_reranked_ids(dataset_name, val_id, n_rerank=100, split=val_split)
-
             l_imgs = Parallel(n_jobs=5, prefer='threads')(delayed(test_dset.get_by_id)(img_id) for img_id in l_reranked)
-            target = concat_data(l_imgs)
-            target = to_cuda(target)
 
-            query = test_dset.get_by_id(val_id)
-            query = repeat_data(query, len(l_imgs))
-            query = to_cuda(query)
-            with torch.no_grad():
-                score, _ = model.score(query, target)
-                score = score.detach().cpu().flatten().tolist()
+            if args.infer_batch:
+                query = test_dset.get_by_id(val_id)
+                query = repeat_data(query, 10)
+                query = to_cuda(query)
+
+                l_score = []
+                for i_batch in range(10):
+                    target = concat_data(l_imgs[i_batch * 10:(i_batch+1) * 10])
+                    target = to_cuda(target)
+
+                    with torch.no_grad():
+                        score, _ = model.score(query, target)
+                        score = score.detach().cpu().flatten().tolist()
+                        l_score += score
+                score = l_score
+            else:
+                query = test_dset.get_by_id(val_id)
+                query = repeat_data(query, len(l_imgs))
+                query = to_cuda(query)
+                target = concat_data(l_imgs)
+                target = to_cuda(target)
+
+                query = test_dset.get_by_id(val_id)
+                query = repeat_data(query, len(l_imgs))
+                query = to_cuda(query)
+                with torch.no_grad():
+                    score, _ = model.score(query, target)
+                    score = score.detach().cpu().flatten().tolist()
+
             l_rel = [sims.get_similarity(val_id, id_) for id_ in l_reranked]
             l_pred.append(score)
             l_true_rel.append(l_rel)

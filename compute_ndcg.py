@@ -139,6 +139,7 @@ if __name__ == '__main__':
     parser.add_argument('model_name', type=str, help='The name of directory to be searched for predicted similarity score')
     parser.add_argument('--resultdir', type=str, default='/data/project/rw/viewer_CBIR/viewer/results/')
     parser.add_argument('--json', action='store_true', help='use separate json file to load query image ids. only valid for vg_coco dataset')
+    parser.add_argument('--no-rerank', action='store_true', help='not using reranking')
     parser.add_argument('--zero-baseline', action='store_true')
     # parser.add_argument('--resnet', type=float, default=None, help='portion of resnet similarity in relevance')
     args = parser.parse_args()
@@ -221,11 +222,14 @@ if __name__ == '__main__':
 
         # ----- reranking
         # print(len(df_pred_sim))
-        l_reranked = get_reranked_ids(args.dataset, query_id)
-        df_pred_sim = df_pred_sim.loc[l_reranked]
+        if not args.no_rerank:
+            l_reranked = get_reranked_ids(args.dataset, query_id, n_rerank=100)
+            df_pred_sim = df_pred_sim.loc[l_reranked]
         # print(len(df_pred_sim))
+        # import pudb; pu.db
 
-        # df_pred_sim = df_pred_sim.drop(index=df_pred_sim.index[df_pred_sim.index==int(query_id)])  # drop self
+        if args.no_rerank:
+            df_pred_sim = df_pred_sim.drop(index=df_pred_sim.index[df_pred_sim.index==int(query_id)])  # drop self
         l_candidate_id = list(df_pred_sim.index)
 
         true_sim = torch.tensor([sbert_sim.get_similarity(query_id, img_id) for img_id in l_candidate_id]).view(1, -1).to(dtype=torch.float)

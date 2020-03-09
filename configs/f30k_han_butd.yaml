@@ -1,9 +1,8 @@
 DATASET:
-  NAME: vg_coco
-  TYPE: gen
+  NAME: f30k 
+  TYPE: butd 
 MODEL:
   TARGET: SBERT
-  VER: 2
   BATCH_SIZE: 32
   LR: 0.0001
   NUM_MAX_HE: 100

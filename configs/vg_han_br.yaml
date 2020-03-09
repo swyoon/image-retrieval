@@ -3,17 +3,18 @@ DATASET:
   TYPE: gen
 MODEL:
   TARGET: SBERT
-  VER: 2
   BATCH_SIZE: 32
   LR: 0.0001
   NUM_MAX_HE: 100
   STEP: 3
-  WORD_EMB_SIZE: 300
-  NUM_HIDDEN: 300
+  WORD_EMB_SIZE: 512
+  NUM_HIDDEN: 256
   NUM_HEAD: 8
   TAIL_RANGE: 100
   SAMPLE_MODE: tail_random 
-  MODE: word
+  MODE: bbox_rel 
+  FEATURE: bbox_rel
+  FINETUNE: True 
 
 
 

@@ -1,9 +1,9 @@
 DATASET:
   NAME: vg_coco
-  TYPE: gen
+  TYPE: norel 
 MODEL:
+  NAME: GraphEmbedding
   TARGET: SBERT
-  VER: 2
   BATCH_SIZE: 32
   LR: 0.0001
   NUM_MAX_HE: 100
@@ -13,7 +13,8 @@ MODEL:
   NUM_HEAD: 8
   TAIL_RANGE: 100
   SAMPLE_MODE: tail_random 
-  MODE: word
-
+  MODE: adj 
+  ALGO: GIN
+  MLP_HIDDEN: 64
 
 

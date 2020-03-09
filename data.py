@@ -280,7 +280,7 @@ class VGDataset:
                 self.sg_path = sg_path
             self.sg = pickle.load(open(self.sg_path, 'rb'))
 
-            self.d_imgid2sgidx = {sg_['imgid']: i for i, sg_ in enumerate(self.sg)}
+            self.d_imgid2sgidx = {int(sg_['imgid']): i for i, sg_ in enumerate(self.sg)}
 
         if vocab_emb is not None:
             self.vocab_emb = pickle.load(open(vocab_emb, 'rb'))
