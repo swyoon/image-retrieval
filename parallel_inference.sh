@@ -1,8 +1,8 @@
 #! /bin/bash
-YAML_NAME=f30k_gin.yaml
-EXP_NAME=f30k_gin
-NAME=f30k-gin-
-N_SPLIT=10
+YAML_NAME=vg_diffpool200.yaml
+EXP_NAME=vg_diffpool200
+NAME=vg-diffpool200-
+N_SPLIT=1
 EPOCH=24
 
 for ((split_idx=0; split_idx<N_SPLIT; split_idx++))

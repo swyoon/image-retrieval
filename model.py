@@ -5,6 +5,8 @@ import torchvision
 import numpy as np
 from torchvision.models import resnet18
 import torch_geometric.nn as gnn
+from model_ssgpool import l2norm, GNN_Block
+from model_graph_ssgpool import dense_diff_pool, get_Spectral_loss, dense_ssgpool
 
 class TripletLoss(nn.Module):
     """
@@ -569,3 +571,144 @@ class GraphEmbedding(nn.Module):
             score_n = (emb_anchor * emb_neg).sum(dim=1)
             loss = self.loss(score_p, score_n)
             return None, loss  # (score, loss)
+
+
+
+class GraphPool(nn.Module):
+    """Graph pooling"""
+    def __init__(self, cfg):
+        super().__init__()
+        self.cfg = cfg
+        self.algo = cfg['MODEL'].get('ALGO', 'DiffPool')
+        self.word_emb_size = cfg['MODEL']['WORD_EMB_SIZE']
+        self.n_hidden = cfg['MODEL']['NUM_HIDDEN']
+        self.n_pooled_node = cfg['MODEL'].get('NUM_POOLED', 20)
+        if self.cfg['MODEL']['TARGET'] == 'SBERT':
+            self.mseloss = nn.MSELoss()
+        else:
+            self.margin = cfg['MODEL']['LOSS_MARGIN']
+            self.loss = TripletLoss(self.margin)
+
+        if self.algo in ('DiffPool',):
+            self.gnn_embed = GNN_Block(self.word_emb_size, self.n_hidden, self.n_hidden) #DenseGCNConv(word_dim, embed_size)#
+            # self.gnn_pool = GNN_Block(self.n_hidden, self.n_hidden, 20) #DenseGCNConv(embed_size, 20)#
+            self.gnn_pool = GNN_Block(self.word_emb_size, self.n_hidden, self.n_pooled_node) #DenseGCNConv(embed_size, 20)#
+            self.gnn_embed2 = GNN_Block(self.n_hidden, self.n_hidden, self.n_hidden) #DenseGCNConv(embed_size, embed_size)
+        elif self.algo == 'SSGPool':
+            self.gnn_embed = GNN_Block(self.word_emb_size, self.n_hidden, self.n_hidden) #DenseGCNConv(word_dim, embed_size) # #
+            self.gnn_pool = GNN_Block(self.word_emb_size, self.n_hidden, self.n_pooled_node) #DenseGCNConv(embed_size, 20) # #
+            self.gnn_embed_f = GNN_Block(self.n_hidden, self.n_hidden, self.n_hidden)#DenseGCNConv(embed_size, embed_size)#
+        else:
+            raise ValueError
+
+        self.lambda_reg = self.cfg['MODEL'].get('LAMBDA_REG', 0)
+        self.use_specloss = self.cfg['MODEL'].get('SPEC_LOSS', False)
+        self.use_entrloss = self.cfg['MODEL'].get('ENTR_LOSS', False)
+        self.use_linkloss = self.cfg['MODEL'].get('LINK_LOSS', False)
+
+    def _embed(self, graph):
+        x = graph['x']
+        adj = graph['adj']
+        lengths = graph['n_node'].flatten()
+        if self.algo == 'DiffPool':
+            spec_losses = 0.
+            entr_losses = 0.
+            link_losses = 0.
+            mask = torch.arange(max(lengths)).expand(len(lengths), max(lengths)).cuda() < lengths.unsqueeze(1)
+            mask = mask.to(torch.float)
+
+            x_next = F.relu(self.gnn_embed(x, adj, mask))
+            s = self.gnn_pool(x, adj, mask)
+            x, adj, link_loss, entr_loss, spec_loss = dense_diff_pool(x_next, adj, s, mask)
+            spec_losses += spec_loss
+            entr_losses += entr_loss
+            link_losses += link_loss
+            features = self.gnn_embed2(x, adj)
+            feature_out = features.mean(dim=1)
+            feature_out = l2norm(feature_out)
+            return feature_out, (spec_losses, entr_losses, link_losses)
+        elif self.algo == 'SSGPool':
+            spec_losses = 0.
+            entr_losses = 0.
+            coarsen_losses = 0.
+            mask = torch.arange(max(lengths)).expand(len(lengths), max(lengths)).cuda() < lengths.unsqueeze(1)
+            mask = mask.to(torch.float)
+
+            B, N, _ = adj.size()
+            s_inv_final = torch.eye(N).unsqueeze(0).expand(B, N, N).cuda()
+            s_final = torch.eye(N).unsqueeze(0).expand(B, N, N).cuda()
+
+            x_next = F.relu(self.gnn_embed(x, adj, mask))
+            s = self.gnn_pool(x, adj, mask)
+            x_next, a_next, Lapl, L_next, s, s_inv = dense_ssgpool(x_next, adj, s, mask)
+
+            s_final = torch.bmm(s_final, s)
+
+            '''Second layer'''
+            x = self.gnn_embed_f(x_next, a_next)
+            feature_out = x.mean(dim=1)
+
+            s_inv_final = s_final.transpose(1, 2) / ((s_final * s_final).sum(dim=1).unsqueeze(
+                -1) + 1e-10)
+
+            spec_loss = get_Spectral_loss(Lapl, L_next, s_inv_final.transpose(1, 2), 3, mask)
+
+            coarsen_loss = adj - torch.matmul(s_final, s_final.transpose(1,2))
+            mask_ = mask.view(B, N, 1).to(x.dtype)
+            coarsen_loss = coarsen_loss * mask_
+            coarsen_loss = coarsen_loss * mask_.transpose(1, 2)
+            coarsen_loss = torch.sqrt((coarsen_loss * coarsen_loss).sum(dim=(1, 2)))
+
+            spec_losses += spec_loss.mean()
+            entr_losses += torch.Tensor([0.]) #entr_loss.mean()
+            coarsen_losses += coarsen_loss.mean()
+
+            feature_out = l2norm(feature_out)
+
+            return feature_out, (spec_losses, entr_losses, coarsen_losses)
+
+
+    def score(self, data1, data2, **kwargs):
+        emb1, reg_loss1 = self._embed(data1)
+        emb2, reg_loss2 = self._embed(data2)
+        score = (emb1 * emb2).sum(dim=1)
+
+        return score, [reg_loss1, reg_loss2]  # (score, pooling losses)
+
+    def forward(self, anchor, pos, neg):
+        if self.cfg['MODEL']['TARGET'] == 'SBERT':
+            # neg is sbert score
+            score_bert = neg
+            score, l_loss = self.score(anchor, pos)
+            loss = self.loss(score, score_bert, l_loss)
+            return None, loss 
+        else:
+            emb_anchor = self._embed(anchor)
+            emb_pos = self._embed(pos)
+            emb_neg = self._embed(neg)
+            score_p = (emb_anchor * emb_pos).sum(dim=1)
+            score_n = (emb_anchor * emb_neg).sum(dim=1)
+            loss = self.loss(score_p, score_n)
+            return None, loss  # (score, loss)
+
+    def loss(self, pred, target, l_reg_loss):
+        loss = self.mseloss(pred, target)
+        reg_loss1, reg_loss2 = l_reg_loss  # losses for each images
+        specloss = torch.tensor(0.).to(pred.device)
+        entrloss = torch.tensor(0.).to(pred.device)
+        linkloss = torch.tensor(0.).to(pred.device)
+
+        for i, (reg1, reg2) in enumerate(zip(reg_loss1, reg_loss2)):
+            if i == 0:
+                if self.use_specloss:
+                    specloss = (reg1 + reg2).mean()
+                    loss += self.lambda_reg * specloss
+            if i == 1:
+                if self.use_entrloss:
+                    entrloss = (reg1 + reg2).mean()
+                    loss += self.lambda_reg * entrloss
+            if i == 2:
+                if self.use_linkloss:
+                    linkloss = (reg1 + reg2).mean()
+                    loss += self.lambda_reg * linkloss
+        return {'loss': loss, 'specloss': specloss, 'entrloss': entrloss, 'linkloss': linkloss}

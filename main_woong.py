@@ -9,7 +9,7 @@ from dataloader import Dset_VG, Dset_VG_inference, Dset_VG_Pairwise, get_word_ve
                        DsetImgPairwise, DsetSGPairwise, repeat_data, concat_data
 from torch.utils.data import DataLoader
 from torchvision import transforms
-from model import HGAN, GraphEmbedding, HGAN_V0, HGAN_V2, HGAN_V3, HGAN_V4
+from model import HGAN, GraphEmbedding, HGAN_V0, HGAN_V2, HGAN_V3, HGAN_V4, GraphPool
 import time
 from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
@@ -277,6 +277,8 @@ def main():
     model_name = mcfg.get('NAME', 'HAN')
     if model_name == 'GraphEmbedding':
         model = GraphEmbedding(model_cfg)
+    elif model_name == 'GraphPool':
+        model = GraphPool(model_cfg)
     elif model_name == 'HGAN_V0':
         model = HGAN_V0(model_cfg)
     elif model_name == 'HGAN_V2':
@@ -314,6 +316,9 @@ def main():
             mini_batch = to_cuda(mini_batch)
             optimizer.zero_grad()
             pred, loss = model(*mini_batch)
+            if isinstance(loss, dict):
+                d_loss = loss
+                loss = loss['loss']
 
             train_loss.append(loss.item())
 
@@ -321,6 +326,10 @@ def main():
             optimizer.step()
 
             summary.add_scalar('loss/train', loss.item(), num_iter)
+            if model_name == 'GraphPool':
+                summary.add_scalar('loss/entrloss', d_loss['entrloss'].item(), num_iter)
+                summary.add_scalar('loss/linkloss', d_loss['linkloss'].item(), num_iter)
+                summary.add_scalar('loss/specloss', d_loss['specloss'].item(), num_iter)
             num_iter += 1
 
             if args.test:
