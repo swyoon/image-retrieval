@@ -1,3 +1,4 @@
+from math import ceil
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -6,7 +7,7 @@ import numpy as np
 from torchvision.models import resnet18
 import torch_geometric.nn as gnn
 from model_ssgpool import l2norm, GNN_Block
-from model_graph_ssgpool import dense_diff_pool, get_Spectral_loss, dense_ssgpool
+from model_graph_ssgpool import dense_diff_pool, get_Spectral_loss, dense_ssgpool, dense_ssgpool_gumbel
 
 class TripletLoss(nn.Module):
     """
@@ -582,7 +583,7 @@ class GraphPool(nn.Module):
         self.algo = cfg['MODEL'].get('ALGO', 'DiffPool')
         self.word_emb_size = cfg['MODEL']['WORD_EMB_SIZE']
         self.n_hidden = cfg['MODEL']['NUM_HIDDEN']
-        self.n_pooled_node = cfg['MODEL'].get('NUM_POOLED', 20)
+        self.n_pooled_node = cfg['MODEL'].get('NUM_POOLED', 200)
         if self.cfg['MODEL']['TARGET'] == 'SBERT':
             self.mseloss = nn.MSELoss()
         else:
@@ -591,13 +592,29 @@ class GraphPool(nn.Module):
 
         if self.algo in ('DiffPool',):
             self.gnn_embed = GNN_Block(self.word_emb_size, self.n_hidden, self.n_hidden) #DenseGCNConv(word_dim, embed_size)#
-            # self.gnn_pool = GNN_Block(self.n_hidden, self.n_hidden, 20) #DenseGCNConv(embed_size, 20)#
             self.gnn_pool = GNN_Block(self.word_emb_size, self.n_hidden, self.n_pooled_node) #DenseGCNConv(embed_size, 20)#
             self.gnn_embed2 = GNN_Block(self.n_hidden, self.n_hidden, self.n_hidden) #DenseGCNConv(embed_size, embed_size)
         elif self.algo == 'SSGPool':
             self.gnn_embed = GNN_Block(self.word_emb_size, self.n_hidden, self.n_hidden) #DenseGCNConv(word_dim, embed_size) # #
             self.gnn_pool = GNN_Block(self.word_emb_size, self.n_hidden, self.n_pooled_node) #DenseGCNConv(embed_size, 20) # #
             self.gnn_embed_f = GNN_Block(self.n_hidden, self.n_hidden, self.n_hidden)#DenseGCNConv(embed_size, embed_size)#
+        elif self.algo == 'SSGPoolV2':
+            num_layers = cfg['MODEL']['N_LAYERS']
+            pool_ratio = cfg['MODEL']['POOL_RATIO']
+            max_num_nodes = 300
+            num_nodes = ceil(pool_ratio * max_num_nodes)
+            self.embed_block1 = GNN_Block(self.word_emb_size, self.n_hidden, self.n_hidden) #DenseGCNConv(word_dim, embed_size) #
+            self.pool_block1 = GNN_Block(self.word_emb_size, self.n_hidden, num_nodes) #DenseGCNConv(embed_size, num_nodes) #
+            self.embed_blocks = torch.nn.ModuleList()
+            self.pool_blocks = torch.nn.ModuleList()
+            for i in range(num_layers - 1):
+                num_nodes = ceil(pool_ratio * num_nodes)
+                self.embed_blocks.append(GNN_Block(self.n_hidden, self.n_hidden, self.n_hidden))
+                self.pool_blocks.append(GNN_Block(self.n_hidden, self.n_hidden, num_nodes))
+
+            self.embed_final = GNN_Block(self.n_hidden, self.n_hidden, self.n_hidden) #DenseGCNConv(embed_size, embed_size) #
+            self.linear_f = nn.Linear(self.n_hidden * (num_layers + 1) , self.n_hidden)
+
         else:
             raise ValueError
 
@@ -666,7 +683,63 @@ class GraphPool(nn.Module):
             feature_out = l2norm(feature_out)
 
             return feature_out, (spec_losses, entr_losses, coarsen_losses)
+        elif self.algo == 'SSGPoolV2':
+            spec_losses = 0.
+            spec_losses_hard = 0.
+            entr_losses = 0.
+            coarsen_losses = 0.
+            mask = torch.arange(max(lengths)).expand(len(lengths), max(lengths)).cuda() < lengths.unsqueeze(1)
+            mask = mask.to(torch.float)
+            B, N, _ = adj.size()
+            s_final = torch.eye(N).unsqueeze(0).expand(B, N, N).cuda()
+            s_inv_final = torch.eye(N).unsqueeze(0).expand(B, N, N).cuda()
+            s_inv_soft_final = torch.eye(N).unsqueeze(0).expand(B, N, N).cuda()
+            ori_adj = adj
 
+            # x = self.embed(x)
+            s = self.pool_block1(x, adj, mask, add_loop=True)
+            x = F.relu(self.embed_block1(x, adj, mask, add_loop=True))
+            diag_ele = torch.sum(adj, -1)
+            Diag = torch.diag_embed(diag_ele)
+            Lapl = Diag - adj
+            Lapl_ori = Lapl
+            x, adj, L_next, L_next_soft, s, s_inv, s_inv_soft = dense_ssgpool_gumbel(x, adj, s, Lapl, Lapl, mask, is_training=self.training)
+
+            s_final = torch.bmm(s_final, s)
+            s_inv_final = torch.bmm(s_inv, s_inv_final)
+            s_inv_soft_final = torch.bmm(s_inv_soft, s_inv_soft_final)
+
+            for i, (embed_block, pool_block) in enumerate(
+                    zip(self.embed_blocks, self.pool_blocks)):
+                s = pool_block(x, adj, add_loop=True)
+                x = F.relu(embed_block(x, adj, add_loop=True))
+                if i < len(self.embed_blocks):
+                    x, adj, L_next, L_next_soft, s, s_inv, s_inv_soft = dense_ssgpool_gumbel(x, adj, s, L_next, L_next_soft, is_training=self.training)
+                    s_final = torch.bmm(s_final, s)
+                    s_inv_final = torch.bmm(s_inv, s_inv_final)
+                    s_inv_soft_final = torch.bmm(s_inv_soft, s_inv_soft_final)
+
+            x = self.embed_final(x, adj, add_loop=True)
+
+            feature_out = x.mean(dim=1)
+
+            spec_loss, spec_loss_hard = get_Spectral_loss(Lapl_ori, L_next, s_inv_final.transpose(1,2), L_next_soft, s_inv_soft_final.transpose(1, 2), 1, mask)
+
+            coarsen_loss = ori_adj - torch.matmul(s_final, s_final.transpose(1,2))
+            mask_ = mask.view(B, N, 1).to(x.dtype)
+            coarsen_loss = coarsen_loss * mask_
+            coarsen_loss = coarsen_loss * mask_.transpose(1, 2)
+            coarsen_loss = torch.sqrt((coarsen_loss * coarsen_loss).sum(dim=(1, 2)))
+
+
+            spec_losses += spec_loss.mean()
+            spec_losses_hard += spec_loss_hard.mean()
+            entr_losses += torch.Tensor([0.]) #entr_loss.mean()
+            coarsen_losses += coarsen_loss.mean()
+
+            feature_out = l2norm(feature_out)
+
+            return feature_out, (spec_losses, spec_losses_hard, coarsen_losses)
 
     def score(self, data1, data2, **kwargs):
         emb1, reg_loss1 = self._embed(data1)

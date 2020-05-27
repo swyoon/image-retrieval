@@ -1,3 +1,4 @@
+from math import ceil
 import torch
 import torch.nn as nn
 import torch.nn.init
@@ -9,8 +10,10 @@ import torch.backends.cudnn as cudnn
 from torch.nn.utils.clip_grad import clip_grad_norm
 import numpy as np
 from collections import OrderedDict
-from torch_geometric.nn import DenseGCNConv, DenseSAGEConv
-from model_graph_ssgpool import dense_diff_pool, get_Spectral_loss, dense_ssgpool
+from torch.nn import Linear, Sequential, ReLU, BatchNorm1d as BN
+from torch_geometric.nn import  DenseSAGEConv, DenseGINConv, GCNConv, global_mean_pool
+from torch_geometric.utils import dense_to_sparse
+from model_graph_ssgpool import DenseGCNConv, dense_diff_pool, get_Spectral_loss, dense_ssgpool, dense_ssgpool_gumbel, SAGPooling, dense_ssgpool_gumbel_select
 #from torch_geometric.nn import GCNConv
 
 from sentence_transformers import SentenceTransformer
@@ -29,7 +32,6 @@ class GNN_Block(torch.nn.Module):
 
         self.conv1 = DenseGCNConv(in_channels, hidden_channels)
         self.conv2 = DenseGCNConv(hidden_channels, hidden_channels)
-        #self.jump = JumpingKnowledge(mode)
         self.lin = nn.Linear(hidden_channels + hidden_channels, out_channels)
 
 
@@ -40,11 +42,30 @@ class GNN_Block(torch.nn.Module):
 
     def forward(self, x, adj, mask=None, add_loop=True):
         x1 = F.relu(self.conv1(x, adj, mask, add_loop))
-        #x1 = F.dropout(x1, p=0.5, training=self.training)
         x2 = F.relu(self.conv2(x1, adj, mask, add_loop))
-        #x2 = F.dropout(x2, p=0.5, training=self.training)
         out = self.lin(torch.cat((x1, x2), -1))
-        #out = F.dropout(out, p=0.5, training=self.training)
+
+        return out
+
+
+class GNN_Block_sparse(torch.nn.Module):
+    def __init__(self, in_channels, hidden_channels, out_channels):
+        super(GNN_Block_sparse, self).__init__()
+
+        self.conv1 = GCNConv(in_channels, hidden_channels)
+        self.conv2 = GCNConv(hidden_channels, hidden_channels)
+        self.lin = nn.Linear(hidden_channels + hidden_channels, out_channels)
+
+    def reset_parameters(self):
+        self.conv1.reset_parameters()
+        self.conv2.reset_parameters()
+        self.lin.reset_parameters()
+
+    def forward(self, x, edge_index, mask=None, add_loop=True):
+        x1 = F.relu(self.conv1(x, edge_index))
+        x2 = F.relu(self.conv2(x1, edge_index))
+        out = self.lin(torch.cat((x1, x2), -1))
+
         return out
 
 class Encoder_word(nn.Module):
@@ -70,7 +91,7 @@ class Encoder_word(nn.Module):
 
 def EncoderImage(data_name, img_dim, vocab_size, word_dim, embed_size,  word_emb, finetune=False,
                  cnn_type='vgg19', gmodel_type=None, use_abs=False, no_imgnorm=False, use_SG=False,
-                 use_specloss=False, use_entrloss=False, use_linkloss=False):
+                 use_specloss=False, use_entrloss=False, use_linkloss=False, num_layers=1, pool_ratio=0.1):
     """A wrapper to image encoders. Chooses between an encoder that uses
     precomputed image features, `EncoderImagePrecomp`, or an encoder that
     computes image features on the fly `EncoderImageFull`.
@@ -105,19 +126,20 @@ def EncoderImage(data_name, img_dim, vocab_size, word_dim, embed_size,  word_emb
             if gmodel_type=='diffpool':
                 img_enc = EncoderDiffPool(vocab_size, word_dim,
                                           embed_size, word_emb, use_abs, no_imgnorm,
-                                          use_specloss, use_entrloss, use_linkloss)
+                                          use_specloss, use_entrloss, use_linkloss, num_layers, pool_ratio)
             elif gmodel_type=='ssgpool':
                 img_enc = EncoderSSGPool(vocab_size, word_dim,
                                           embed_size, word_emb, use_abs, no_imgnorm,
-                                          use_specloss, use_entrloss, use_linkloss)
+                                          use_specloss, use_entrloss, use_linkloss, num_layers, pool_ratio)
 
-            elif gmodel_type=='ssgpool_select':
-                img_enc = EncoderSSGPool_select(vocab_size, word_dim,
-                                         embed_size, word_emb, use_abs, no_imgnorm,
-                                         use_specloss, use_entrloss, use_linkloss)
             elif gmodel_type=='gcn':
                 img_enc = EncoderGCN(vocab_size, word_dim,
-                                         embed_size, word_emb, use_abs, no_imgnorm)
+                                         embed_size, word_emb, use_abs, no_imgnorm, num_layers)
+            elif gmodel_type=='sagpool':
+                img_enc = EncoderSAGPool(vocab_size, word_dim,
+                                          embed_size, word_emb, use_abs, no_imgnorm,
+                                          use_specloss, use_entrloss, use_linkloss, num_layers, pool_ratio)
+
             else:
                 print("gmodel_type NEEDED")
         else:
@@ -128,7 +150,7 @@ def EncoderImage(data_name, img_dim, vocab_size, word_dim, embed_size,  word_emb
 
 class EncoderGCN(nn.Module):
 
-    def __init__(self, vocab_size, word_dim, embed_size, word_emb, use_abs=False, no_imgnorm=False):
+    def __init__(self, vocab_size, word_dim, embed_size, word_emb, use_abs=False, no_imgnorm=False, num_layers=1):
         """Load pretrained VGG19 and replace top fc layer."""
         super(EncoderGCN, self).__init__()
         self.embed_size = embed_size
@@ -138,15 +160,15 @@ class EncoderGCN(nn.Module):
         self.embed_final = nn.Linear(embed_size, embed_size)
 
         # Load a pre-trained model
-        self.gnn1 = DenseGCNConv(word_dim, embed_size)
-        self.gnn2 = DenseGCNConv(embed_size, embed_size)
+        self.gnn1 = GNN_Block(word_dim, embed_size, embed_size) # DenseGCNConv(word_dim, embed_size)
+        self.gnn2 = GNN_Block(embed_size, embed_size, embed_size) # DenseGCNConv(embed_size, embed_size)
         #self.gnn3 = DenseGCNConv(embed_size, embed_size)
 
     def forward(self, images, lengths):
         """Extract image feature vectors."""
         x = images['nodes']
         adj = images['adj']
-        adj += adj.transpose(1, 2)
+        adj = ((adj + adj.transpose(1, 2)) > 0.).float()
 
         mask = torch.arange(max(lengths)).expand(len(lengths), max(lengths)).cuda() < lengths.unsqueeze(1)
 
@@ -175,7 +197,7 @@ class EncoderGCN(nn.Module):
 class EncoderDiffPool(nn.Module):
 
     def __init__(self, vocab_size, word_dim, embed_size, word_emb, use_abs=False, no_imgnorm=False,
-                 use_specloss=False, use_entrloss=False, use_linkloss=False):
+                 use_specloss=False, use_entrloss=False, use_linkloss=False, num_layers=1, pool_ratio=0.1):
         """Load pretrained VGG19 and replace top fc layer."""
         super(EncoderDiffPool, self).__init__()
         self.embed_size = embed_size
@@ -187,47 +209,63 @@ class EncoderDiffPool(nn.Module):
         self.embed = word_emb
         #self.embed_final = nn.Linear(embed_size, embed_size)
 
+        num_layers = num_layers
+        ratio = pool_ratio
+        max_num_nodes = 300
+        num_nodes = num_nodes = ceil(ratio * max_num_nodes)
         # Load a pre-trained model
-        self.gnn_embed = GNN_Block(word_dim, embed_size, embed_size) #DenseGCNConv(word_dim, embed_size)#
-        self.gnn_pool = GNN_Block(embed_size, embed_size, 20) #DenseGCNConv(embed_size, 20)#
-        self.gnn_embed2 = GNN_Block(word_dim, embed_size, embed_size) #DenseGCNConv(embed_size, embed_size)
-        #self.gnn3 = DenseGCNConv(embed_size, embed_size)
+        self.embed_block1 = GNN_Block(word_dim, embed_size, embed_size) #DenseGCNConv(word_dim, embed_size)  #
+        # self.gnn_pool = GNN_Block(embed_size, embed_size, 1) #DenseGCNConv(embed_size, 20)#
+        self.pool_block1 = GNN_Block(embed_size, embed_size, num_nodes) #DenseGCNConv(embed_size, num_nodes)  #
 
+        self.embed_blocks = torch.nn.ModuleList()
+        self.pool_blocks = torch.nn.ModuleList()
+
+        for i in range(num_layers - 1):
+            num_nodes = ceil(ratio * num_nodes)
+            self.embed_blocks.append(GNN_Block(embed_size, embed_size, embed_size))
+            self.pool_blocks.append(GNN_Block(embed_size, embed_size, num_nodes))
+
+        self.embed_final = GNN_Block(embed_size, embed_size, embed_size)  # GNN_Block(embed_size, embed_size, embed_size) #
+        self.linear_f = nn.Linear(embed_size * (num_layers+1), embed_size)
     def forward(self, images, lengths):
         """Extract image feature vectors."""
         x = images['nodes']
         adj = images['adj']
-        adj = adj + adj.transpose(1, 2)
+        adj = ((adj + adj.transpose(1, 2)) > 0.).float()
         spec_losses = 0.
         entr_losses = 0.
         link_losses = 0.
         mask = torch.arange(max(lengths)).expand(len(lengths), max(lengths)).cuda() < lengths.unsqueeze(1)
 
         x = self.embed(x)
-        x_next = F.relu(self.gnn_embed(x, adj, mask))
-        s = self.gnn_pool(x, adj, mask)
-        x, adj, link_loss, entr_loss, spec_loss = dense_diff_pool(x_next, adj, s, mask)
-        #x, adj, link_loss, entr_loss, spec_loss = dense_diff_pool_lap(x, adj, s, mask)
-        #dense_diff_pool_lap
-        #if self.use_specloss == False:
-        #    spec_loss = 0.
-        #if self.use_entrloss == False:
-        #    entr_loss = 0.
-        #if self.use_linkloss == False:
-        #    link_loss = 0.
-        spec_losses += spec_loss
-        entr_losses += entr_loss
+
+        s = self.pool_block1(x, adj, mask, add_loop=True)
+        x = F.relu(self.embed_block1(x, adj, mask, add_loop=True))
+        xs = [torch.sum(x, 1) / (mask.sum(-1, keepdims=True).to(x.dtype)+1e-10)]
+        x, adj, link_loss, ent_loss = dense_diff_pool(x, adj, s, mask)
         link_losses += link_loss
+        entr_losses += ent_loss
+        for i, (embed_block, pool_block) in enumerate(
+                zip(self.embed_blocks, self.pool_blocks)):
+            s = pool_block(x, adj)
+            x = F.relu(embed_block(x, adj))
+            xs.append(x.mean(dim=1))
+            if i < len(self.embed_blocks):
+                x, adj, link_loss, ent_loss = dense_diff_pool(x, adj, s)
+                link_losses += link_loss
+                entr_losses += ent_loss
+
+        spec_losses += torch.Tensor([0.])
         #features = F.dropout(features, 0.5)
-        features = self.gnn_embed2(x, adj)
-        feature_out = features.mean(dim=1)
-        #features = self.gnn3(features, adj, mask)
-        #features += x
+        x = self.embed_final(x, adj)
+
+        xs.append(torch.mean(x, 1))
+        final_x = F.dropout(torch.cat(xs, -1), p=0.5, training=self.training)
+        feature_out = self.linear_f(final_x)
+        #feature_out = x.mean(dim=1)
 
 
-        #feature_out = torch.sum(features, 1) / lengths.unsqueeze(-1).to(x.dtype)
-        #feature_out = self.embed_final(feature_out)
-        #feature_out = self.embed_final(feature_out)
 
         if not self.no_imgnorm:
             feature_out = l2norm(feature_out)
@@ -242,7 +280,7 @@ class EncoderDiffPool(nn.Module):
 class EncoderSSGPool(nn.Module):
 
     def __init__(self, vocab_size, word_dim, embed_size, word_emb, use_abs=False, no_imgnorm=False,
-                 use_specloss=False, use_entrloss=False, use_linkloss=False):
+                 use_specloss=False, use_entrloss=False, use_linkloss=False, num_layers=1, pool_ratio=0.1):
         """Load pretrained VGG19 and replace top fc layer."""
         super(EncoderSSGPool, self).__init__()
         self.embed_size = embed_size
@@ -253,22 +291,117 @@ class EncoderSSGPool(nn.Module):
         self.use_linkloss = use_linkloss
         self.embed = word_emb
         #self.embed_final = nn.Linear(embed_size, embed_size)
-
+        num_layers = num_layers
+        ratio = pool_ratio
+        max_num_nodes = 300
+        num_nodes = ceil(ratio * max_num_nodes)
         # Load a pre-trained model
-        self.gnn_embed = GNN_Block(word_dim, embed_size, embed_size) #DenseGCNConv(word_dim, embed_size) # #
-        self.gnn_pool = GNN_Block(embed_size, embed_size, 20) #DenseGCNConv(embed_size, 20) # #
+        self.embed_block1 = GNN_Block(word_dim, embed_size, embed_size) #DenseGCNConv(word_dim, embed_size) #
+        #self.gnn_pool = GNN_Block(embed_size, embed_size, 1) #DenseGCNConv(embed_size, 20)#
+        self.pool_block1 = GNN_Block(embed_size, embed_size, num_nodes) #DenseGCNConv(embed_size, num_nodes) #
 
-        #self.gnn_embed2 = GNN_Block(word_dim, embed_size, embed_size)  # DenseGCNConv(word_dim, embed_size) ##
-        #self.gnn_pool2 = GNN_Block(embed_size, embed_size, 50)
+        self.embed_blocks = torch.nn.ModuleList()
+        self.pool_blocks = torch.nn.ModuleList()
 
-        self.gnn_embed_f = GNN_Block(embed_size, embed_size, embed_size)#DenseGCNConv(embed_size, embed_size)#
+        for i in range(num_layers - 1):
+            num_nodes = ceil(ratio * num_nodes)
+            self.embed_blocks.append(GNN_Block(embed_size, embed_size, embed_size))
+            self.pool_blocks.append(GNN_Block(embed_size, embed_size, num_nodes))
 
+        self.embed_final = GNN_Block(embed_size, embed_size, embed_size) #DenseGCNConv(embed_size, embed_size) #
+        self.linear_f = nn.Linear(embed_size * (num_layers+1) , embed_size)
 
     def forward(self, images, lengths):
         """Extract image feature vectors."""
         x = images['nodes']
         adj = images['adj']
         #adj = adj + adj.transpose(1, 2)
+        adj = ((adj + adj.transpose(1, 2)) > 0.).float()
+        spec_losses = 0.
+        spec_losses_hard = 0.
+        entr_losses = 0.
+        coarsen_losses = 0.
+        mask = torch.arange(max(lengths)).expand(len(lengths), max(lengths)).cuda() < lengths.unsqueeze(1)
+        B, N, _ = adj.size()
+        s_final = torch.eye(N).unsqueeze(0).expand(B, N, N).cuda()
+        s_inv_final = torch.eye(N).unsqueeze(0).expand(B, N, N).cuda()
+        s_inv_soft_final = torch.eye(N).unsqueeze(0).expand(B, N, N).cuda()
+        ori_adj = adj
+
+        x = self.embed(x)
+        s = self.pool_block1(x, adj, mask, add_loop=True)
+        x = F.relu(self.embed_block1(x, adj, mask, add_loop=True))
+        #xs = [torch.sum(x, 1) / (mask.sum(-1, keepdims=True).to(x.dtype) + 1e-10)]
+        #x, adj, Lapl, L_next, s, s_inv = dense_ssgpool(x, adj, s, mask)
+        diag_ele = torch.sum(adj, -1)
+        Diag = torch.diag_embed(diag_ele)
+        Lapl = Diag - adj
+        Lapl_ori = Lapl
+        x, adj, L_next, L_next_soft, s, s_inv, s_inv_soft = dense_ssgpool_gumbel(x, adj, s, Lapl, Lapl, mask, is_training=self.training)
+
+        s_final = torch.bmm(s_final, s)
+        s_inv_final = torch.bmm(s_inv, s_inv_final)
+        s_inv_soft_final = torch.bmm(s_inv_soft, s_inv_soft_final)
+
+        for i, (embed_block, pool_block) in enumerate(
+                zip(self.embed_blocks, self.pool_blocks)):
+            s = pool_block(x, adj, add_loop=True)
+            x = F.relu(embed_block(x, adj, add_loop=True))
+            #xs.append(x.mean(dim=1))
+            if i < len(self.embed_blocks):
+                #x, adj, _, L_next, s, s_inv = dense_ssgpool(x, adj, s)
+                x, adj, L_next, L_next_soft, s, s_inv, s_inv_soft = dense_ssgpool_gumbel(x, adj, s, L_next, L_next_soft, is_training=self.training)
+                s_final = torch.bmm(s_final, s)
+                s_inv_final = torch.bmm(s_inv, s_inv_final)
+                s_inv_soft_final = torch.bmm(s_inv_soft, s_inv_soft_final)
+
+        x = self.embed_final(x, adj, add_loop=True)
+        # xs.append(torch.sum(x, 1) / mask.sum(-1, keepdims=True).to(x.dtype))
+        #xs.append(torch.mean(x, 1))
+
+        #feature_out = x.sum(dim=1)
+        feature_out = x.mean(dim=1)
+        #final_x = F.dropout(torch.cat(xs, -1), p=0.5, training=self.training)
+        #feature_out = self.linear_f(torch.cat(xs, -1))
+
+
+        spec_loss, spec_loss_hard = get_Spectral_loss(Lapl_ori, L_next, s_inv_final.transpose(1,2), L_next_soft, s_inv_soft_final.transpose(1, 2), 1, mask)
+
+        '''
+        sm_N = s_final.size(-1)
+        identity = torch.eye(sm_N).unsqueeze(0).expand(B, sm_N, sm_N).cuda()
+        norm_s_final = s_final / torch.sqrt(((s_final * s_final).sum(dim=1,keepdim=True)+ 1e-10))
+        coarsen_loss = identity - torch.matmul(norm_s_final.transpose(1,2), norm_s_final)
+        coarsen_loss = torch.sqrt((coarsen_loss * coarsen_loss).sum(dim=(1, 2)))
+        '''
+        coarsen_loss = ori_adj - torch.matmul(s_final, s_final.transpose(1,2))
+        mask_ = mask.view(B, N, 1).to(x.dtype)
+        coarsen_loss = coarsen_loss * mask_
+        coarsen_loss = coarsen_loss * mask_.transpose(1, 2)
+        #link_loss = torch.sqrt((link_loss * link_loss).sum(dim=(1, 2))) / (lengths*lengths + 1e-9)
+        coarsen_loss = torch.sqrt((coarsen_loss * coarsen_loss).sum(dim=(1, 2)))
+
+
+        spec_losses += spec_loss.mean()
+        spec_losses_hard += spec_loss_hard.mean()
+        entr_losses += torch.Tensor([0.]) #entr_loss.mean()
+        coarsen_losses += coarsen_loss.mean()
+
+
+        if not self.no_imgnorm:
+            feature_out = l2norm(feature_out)
+
+        # take the absolute value of the embedding (used in order embeddings)
+        if self.use_abs:
+            feature_out = torch.abs(feature_out)
+        #feature_out = F.dropout(feature_out, 0.5)
+        return feature_out, (spec_losses, spec_losses_hard, coarsen_losses)
+
+    def forward_vis(self, images, lengths):
+        """Extract image feature vectors."""
+        x = images['nodes']
+        adj = images['adj']
+        # adj = adj + adj.transpose(1, 2)
         adj = ((adj + adj.transpose(1, 2)) > 0.).float()
         spec_losses = 0.
         entr_losses = 0.
@@ -281,93 +414,28 @@ class EncoderSSGPool(nn.Module):
         x = self.embed(x)
         x_next = F.relu(self.gnn_embed(x, adj, mask))
         s = self.gnn_pool(x, adj, mask)
-        #xs = [torch.sum(x, 1) / lengths.unsqueeze(-1).to(x.dtype)]
-        #x, adj, link_loss, entr_loss, spec_loss = dense_diff_pool(x, adj, s, mask)
-        #x, adj, link_loss, entr_loss, spec_loss = dense_diff_pool_lap(x, adj, s, mask)
-        x_next, a_next, Lapl, L_next, s, s_inv = dense_ssgpool(x_next, adj, s, mask)
+        # xs = [x_next.mean(dim=1)]
+        # xs = [torch.sum(x, 1) / lengths.unsqueeze(-1).to(x.dtype)]
 
+        x_next, a_next, Lapl, L_next, s, s_inv = dense_ssgpool_gumbel(x_next, adj, s, mask)
+        # x_next, a_next, Lapl, L_next, s, s_inv = dense_ssgpool(x_next, adj, s, mask)
         s_final = torch.bmm(s_final, s)
-        #s_inv_final = torch.bmm(s_inv, s_inv_final)
+        s_inv_final = torch.bmm(s_inv, s_inv_final)
 
         '''Second layer'''
-        #x = F.relu(self.gnn_embed2(x_next, a_next))
-        #s = self.gnn_pool2(x, a_next)
-        #x_next, a_next, Lapl, L_next, s, s_inv = dense_ssgpool_lap(x, a_next, s)
-        #s_final = torch.bmm(s_final, s)
+        # x = x_next
+        # x_next = F.relu(self.gnn_embed2(x, a_next))
+        # xs.append(x_next.mean(dim=1))
+
+        # s = self.gnn_pool2(x, a_next)
+        # x_next, a_next, _, L_next, s, s_inv = dense_ssgpool(x_next, a_next, s)
+        # s_final = torch.bmm(s_final, s)
+        # s_inv_final = torch.bmm(s_inv, s_inv_final)
 
         x = self.gnn_embed_f(x_next, a_next)
         feature_out = x.mean(dim=1)
-        #xs.append(x.mean(dim=1))
 
 
-        s_inv_final = s_final.transpose(1, 2) / ((s_final * s_final).sum(dim=1).unsqueeze(
-            -1) + 1e-10)
-
-        spec_loss = get_Spectral_loss(Lapl, L_next, s_inv_final.transpose(1, 2), 3, mask)
-        #spec_loss = get_Spectral_loss_lap_multi(Lapl, L_next, s_inv_final.transpose(1,2), mask)
-        #spec_loss = adj - torch.matmul(s_final, s_final.transpose(1,2))
-
-        #identity = torch.eye(N).unsqueeze(0).expand(B, N, N).cuda()
-        #adj = adj + identity# for new link loss
-
-        coarsen_loss = adj - torch.matmul(s_final, s_final.transpose(1,2))
-        mask_ = mask.view(B, N, 1).to(x.dtype)
-        coarsen_loss = coarsen_loss * mask_
-        coarsen_loss = coarsen_loss * mask_.transpose(1, 2)
-        #link_loss = torch.sqrt((link_loss * link_loss).sum(dim=(1, 2))) / (lengths*lengths + 1e-9)
-        coarsen_loss = torch.sqrt((coarsen_loss * coarsen_loss).sum(dim=(1, 2)))
-
-
-
-        #entr_loss = (-s_final * torch.log(s_final + 1e-10)).sum(dim=-1)
-        #entr_loss = entr_loss.sum(-1) / (mask.sum(-1) + 1e-10)
-
-        spec_losses += spec_loss.mean()
-        entr_losses += torch.Tensor([0.]) #entr_loss.mean()
-        coarsen_losses += coarsen_loss.mean()
-
-
-
-
-
-
-
-        if not self.no_imgnorm:
-            feature_out = l2norm(feature_out)
-
-        # take the absolute value of the embedding (used in order embeddings)
-        if self.use_abs:
-            feature_out = torch.abs(feature_out)
-        #feature_out = F.dropout(feature_out, 0.5)
-        return feature_out, (spec_losses, entr_losses, coarsen_losses)
-
-    def forward_vis(self, images, lengths):
-        """Extract image feature vectors."""
-        x = images['nodes']
-        adj = images['adj']
-        adj = adj + adj.transpose(1, 2)
-
-        mask = torch.arange(max(lengths)).expand(len(lengths), max(lengths)).cuda() < lengths.unsqueeze(1)
-        B, N, _ = adj.size()
-        s_inv_final = torch.eye(N).unsqueeze(0).expand(B, N, N).cuda()
-        s_final = torch.eye(N).unsqueeze(0).expand(B, N, N).cuda()
-
-        x = self.embed(x)
-        x = F.relu(self.gnn_embed(x, adj, mask))
-        s = self.gnn_pool(x, adj, mask)
-
-        x_next, a_next, Lapl, L_next, s, s_inv = dense_ssgpool_lap(x, adj, s, mask)
-
-        s_final = torch.bmm(s_final, s)
-
-        '''Second layer'''
-        x = self.gnn_embed_f(x_next, a_next)
-        feature_out = x.mean(dim=1)
-        #xs.append(x.mean(dim=1))
-
-
-        s_inv_final = s_final.transpose(1, 2) / ((s_final * s_final).sum(dim=1).unsqueeze(
-            -1) + 1e-10)
 
 
         if not self.no_imgnorm:
@@ -378,6 +446,72 @@ class EncoderSSGPool(nn.Module):
             feature_out = torch.abs(feature_out)
         #feature_out = F.dropout(feature_out, 0.5)
         return feature_out, s_final.transpose(1,2)
+
+
+
+class EncoderSAGPool(nn.Module):
+
+    def __init__(self, vocab_size, word_dim, embed_size, word_emb, use_abs=False, no_imgnorm=False,
+                 use_specloss=False, use_entrloss=False, use_linkloss=False, num_layers=1, pool_ratio=0.1):
+        """Load pretrained VGG19 and replace top fc layer."""
+        super(EncoderSAGPool, self).__init__()
+        self.embed_size = embed_size
+        self.no_imgnorm = no_imgnorm
+        self.use_abs = use_abs
+
+        self.embed = word_emb
+        self.word_dim = word_dim
+        self.embed_size = embed_size
+        self.gnn_embed = GNN_Block_sparse(word_dim, embed_size, embed_size) #GCNConv(word_dim, embed_size) #
+        self.gnn_pool = SAGPooling(embed_size, 0.2)
+
+        #self.gnn_embed2 = DenseGCNConv(word_dim, embed_size) #GNN_Block(word_dim, embed_size, embed_size)  # #
+        #self.gnn_pool2 = DenseGCNConv(embed_size, 10) #GNN_Block(embed_size, embed_size, 5) #
+
+        self.gnn_embed_f = GNN_Block_sparse(embed_size, embed_size, embed_size) #GCNConv(embed_size, embed_size) #
+        self.linear_f = nn.Linear(embed_size * 2 , embed_size)
+
+    def forward(self, images, lengths):
+        """Extract image feature vectors."""
+        #print("processing")
+        x = images['nodes_flat']
+        adj = images['adj_flat']
+        batch = images['batch']
+        #print(x)
+        #print(adj)
+        #print(batch)
+        #adj = adj + adj.transpose(1, 2)
+        adj = ((adj + adj.transpose(0, 1)) > 0.).float()
+        edge_index, _ = dense_to_sparse(adj)
+
+        x = self.embed(x)
+        #x = x.squeeze(0)
+        x = F.relu(self.gnn_embed(x, edge_index))
+        xs = [global_mean_pool(x, batch)]
+        x, edge_index, _, batch, _, _ =self.gnn_pool(x, edge_index, batch=batch)
+
+
+        x = self.gnn_embed_f(x, edge_index)
+
+        xs.append(global_mean_pool(x, batch))
+        feature_out = self.linear_f(torch.cat(xs, -1))
+        #feature_out = global_mean_pool(x, batch)
+        if not self.no_imgnorm:
+            feature_out = l2norm(feature_out)
+
+        # take the absolute value of the embedding (used in order embeddings)
+        if self.use_abs:
+            feature_out = torch.abs(feature_out)
+
+
+        spec_losses = torch.Tensor([0.])
+        entr_losses = torch.Tensor([0.])
+        coarsen_losses = torch.Tensor([0.])
+        #feature_out = F.dropout(feature_out, 0.5)
+        return feature_out, (spec_losses, entr_losses, coarsen_losses)
+
+
+
 '''
 class EncoderSSGPool_select(nn.Module):
 
@@ -845,8 +979,8 @@ class VSE(object):
 
     def __init__(self, data_name='coco', img_dim=4096, finetune=False, cnn_type='vgg16', gmodel_type=None,
                  use_abs=False, no_imgnorm=False, no_txtnorm=False, word_dim=300,word_dim_sg=300, embed_size=1024, grad_clip=2,
-                 learning_rate=0.0002, margin=0.2, sbert=False, max_violation=False, num_layers=1, vocab_size=11755, sg_vocab_size=0,
-                 word_emb=None, measure='cosine', finetune_bert=False, use_SG=False, use_specloss=False, use_entrloss=False, use_linkloss=False, lambda_reg = 1.0,  **kwargs):
+                 learning_rate=0.0002, margin=0.2, sbert=False, max_violation=False, vocab_size=11755, sg_vocab_size=0,
+                 word_emb=None, measure='cosine', finetune_bert=False, use_SG=False, use_specloss=False, use_entrloss=False, use_linkloss=False, lambda_reg = 1.0, num_layers = 1, pool_ratio=0.1,  **kwargs):
         # tutorials/09 - Image Captioningƒ
         # Build Models
         self.grad_clip = grad_clip
@@ -865,7 +999,8 @@ class VSE(object):
                                     use_abs=use_abs,
                                     no_imgnorm=no_imgnorm,
                                     use_SG=use_SG,
-                                    use_specloss=use_specloss, use_entrloss=use_entrloss, use_linkloss=use_linkloss)
+                                    use_specloss=use_specloss, use_entrloss=use_entrloss, use_linkloss=use_linkloss,
+                                    num_layers=num_layers, pool_ratio=pool_ratio)
         if sbert:
             self.txt_enc = EncoderSbert(embed_size,
                                         use_abs=use_abs,
@@ -930,6 +1065,9 @@ class VSE(object):
             if self.use_SG == True:
                 images['nodes'] = images['nodes'].cuda()
                 images['adj'] = images['adj'].cuda()
+                images['nodes_flat'] = images['nodes_flat'].cuda()
+                images['adj_flat'] = images['adj_flat'].cuda()
+                images['batch'] = images['batch'].cuda()
                 img_lengths = img_lengths.cuda()
             else:
                 images = images.cuda()
@@ -975,6 +1113,9 @@ class VSE(object):
             if self.use_SG == True:
                 images['nodes'] = images['nodes'].cuda()
                 images['adj'] = images['adj'].cuda()
+                images['nodes_flat'] = images['nodes_flat'].cuda()
+                images['adj_flat'] = images['adj_flat'].cuda()
+                images['batch'] = images['batch'].cuda()
                 img_lengths = img_lengths.cuda()
             else:
                 images = images.cuda()
@@ -1000,6 +1141,9 @@ class VSE(object):
             if self.use_SG == True:
                 images['nodes'] = images['nodes'].cuda()
                 images['adj'] = images['adj'].cuda()
+                images['nodes_flat'] = images['nodes_flat'].cuda()
+                images['adj_flat'] = images['adj_flat'].cuda()
+                images['batch'] = images['batch'].cuda()
                 img_lengths = img_lengths.cuda()
             else:
                 images = images.cuda()
