@@ -228,6 +228,11 @@ def main():
             vocab_emb_path = '/data/project/rw/CBIR/data/vg_coco/sgg_grcnn/glove_embs_vgcoco_sgg_grcnn.pkl' 
             vocab2idx_path = '/data/project/rw/CBIR/data/vg_coco/sgg_grcnn/vocab2idx_vgcoco_sgg_grcnn.pkl' 
             idx2vocab_path = '/data/project/rw/CBIR/data/vg_coco/sgg_grcnn/idx2vocab_vgcoco_sgg_grcnn.pkl'
+        elif model_cfg['DATASET']['TYPE'] == 'GTconn':  # connected GT graph
+            sg_path = '/data/project/rw/txt-img-retrieval/data/coco_sgalign/sg_align/vgcoco_sgg_newgt_connected_all_revised_with_adj.pkl'
+            vocab_emb_path = '/data/project/rw/txt-img-retrieval/data/coco_sgalign/glove/glove_embs_vgcoco_sgg_newgt_connected_all_revised.pkl'
+            vocab2idx_path = '/data/project/rw/txt-img-retrieval/data/coco_sgalign/glove/vocab2idx_vgcoco_sgg_newgt_connected_all_revised.pkl'
+            idx2vocab_path = '/data/project/rw/txt-img-retrieval/data/coco_sgalign/glove/idx2vocab_vgcoco_sgg_newgt_connected_all_revised.pkl'
 
         print(f'scene graph file: {sg_path}')
         print(f'vocab embedding: {vocab_emb_path}')
@@ -235,8 +240,12 @@ def main():
         print(f'idx2vocab : {idx2vocab_path}')
 
         sims = BERTSimilarity(sim_mat_file, sim_id_file)
-        ds = VGDataset(vocab_emb=vocab_emb_path, vocab2idx=vocab2idx_path, idx2vocab=idx2vocab_path,
-                       sg_path=sg_path)
+        if model_cfg['DATASET']['TYPE'] == 'GTconn':  # connected GT graph
+            ds = VGDataset(vocab_emb=vocab_emb_path, vocab2idx=vocab2idx_path, idx2vocab=idx2vocab_path,
+                           sg_path=sg_path, new_split=True)
+        else:
+            ds = VGDataset(vocab_emb=vocab_emb_path, vocab2idx=vocab2idx_path, idx2vocab=idx2vocab_path,
+                           sg_path=sg_path, new_split=False)
     print("loaded label data {}s".format(time.time()-tic))
 
     # ------------ Construct Dataset Class ------------------------------------

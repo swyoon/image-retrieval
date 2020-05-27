@@ -267,11 +267,16 @@ class FlickrDataset(data.Dataset):
 
 class VGDataset:
     def __init__(self, root='/data/project/rw/CBIR/data/vg_coco',
-                 vocab_emb=None, vocab2idx=None, idx2vocab=None, sg_path=False):
+                 vocab_emb=None, vocab2idx=None, idx2vocab=None, sg_path=False, new_split=False):
+        """
+        new_split: use split provided by kloud.on"""
         self.name = 'vg_coco'
         self.root = root
         self.img_dir = os.path.join(root, 'images')
-        self.d_split = pickle.load(open('/data/project/rw/CBIR/data/vg_coco/vg_coco_split.pkl', 'rb'))
+        if new_split:
+            self.d_split = pickle.load(open('/data/project/rw/txt-img-retrieval/data/coco_sgalign/sg_align/new_split/split_0.pkl', 'rb'))
+        else:
+            self.d_split = pickle.load(open('/data/project/rw/CBIR/data/vg_coco/vg_coco_split.pkl', 'rb'))
 
         if not (sg_path == False):
             if sg_path is None:

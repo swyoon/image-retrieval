@@ -1,0 +1,24 @@
+DATASET:
+  NAME: vg_coco
+  TYPE: gen 
+MODEL:
+  NAME: GraphPool 
+  TARGET: SBERT
+  BATCH_SIZE: 32
+  LR: 0.0001
+  NUM_MAX_HE: 100
+  STEP: 3
+  WORD_EMB_SIZE: 300
+  NUM_HIDDEN: 256
+  NUM_HEAD: 8
+  TAIL_RANGE: 100
+  SAMPLE_MODE: tail_random 
+  MODE: adj 
+  ALGO: SSGPoolV2
+  LAMBDA_REG: 0.05
+  SPEC_LOSS: True
+  ENTR_LOSS: False 
+  LINK_LOSS: False 
+  NUM_POOLED: 100
+  N_LAYERS: 1
+  POOL_RATIO: 0.2

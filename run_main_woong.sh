@@ -3,9 +3,9 @@
 # CUDA_VISIBLE_DEVICES=2 python main_woong.py --config_file configs/han_meansbert_gen_repro.yaml \
 #     --exp_name vg_han_tmb --ckpt ckpt/ --tb_path tb/ --max_epoch 25
 
-YAML_NAME=vg_ssgpoolV2.yaml
-EXP_NAME=vg_ssgpoolV2
-NAME=vg-ssgpol
+YAML_NAME=vgsp_gt_ssgpoolV2.yaml
+EXP_NAME=vgsp_gt_ssgpoolV2
+NAME=vgsp-gt-ssgpol
 CMD="python main_woong.py --config_file configs/${YAML_NAME} --exp_name ${EXP_NAME} --max_epoch 25 --num_workers 14"
 # CUDA_VISIBLE_DEVICES=2 $CMD
 brain task create -p 76 --cmd "${CMD}" \
