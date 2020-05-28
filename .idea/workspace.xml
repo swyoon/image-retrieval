@@ -1,23 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
   <component name="ChangeListManager">
-    <list default="true" id="61ec20f0-0386-44a2-9b1b-7d6fb73d67a4" name="Default Changelist" comment="SBERT regression 모델 구현">
-      <change afterPath="$PROJECT_DIR$/.idea/inspectionProfiles/Project_Default.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/inference_kwon.sh" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/CBIR.iml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/CBIR.iml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/deployment.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/deployment.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/misc.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/misc.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/configs/vg_ssgpoolV2.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/configs/vg_ssgpoolV2.yaml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/configs/vgsp_gt_ssgpoolV2.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/configs/vgsp_gt_ssgpoolV2.yaml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/model.py" beforeDir="false" afterPath="$PROJECT_DIR$/model.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/model_graph_ssgpool.py" beforeDir="false" afterPath="$PROJECT_DIR$/model_graph_ssgpool.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/parallel_inference.sh" beforeDir="false" afterPath="$PROJECT_DIR$/parallel_inference.sh" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/preprocess/parallel_inference.sh" beforeDir="false" afterPath="$PROJECT_DIR$/preprocess/parallel_inference.sh" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/run_main_img.sh" beforeDir="false" afterPath="$PROJECT_DIR$/run_main_img.sh" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/run_main_woong.sh" beforeDir="false" afterPath="$PROJECT_DIR$/run_main_woong.sh" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/viewer/run.sh" beforeDir="false" afterPath="$PROJECT_DIR$/viewer/run.sh" afterDir="false" />
-    </list>
+    <list default="true" id="61ec20f0-0386-44a2-9b1b-7d6fb73d67a4" name="Default Changelist" comment="SBERT regression 모델 구현" />
     <option name="EXCLUDED_CONVERTED_TO_IGNORED" value="true" />
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -210,7 +194,7 @@
       <option name="number" value="Default" />
       <option name="presentableId" value="Default" />
       <updated>1570770831603</updated>
-      <workItem from="1590559984295" duration="6785000" />
+      <workItem from="1590559984295" duration="6922000" />
     </task>
     <task id="LOCAL-00001" summary="전체 visual genome scene graph 에서 coco image랑 겹치는 image 에 대한 scene graph만 남기는 코드">
       <created>1571315097036</created>
