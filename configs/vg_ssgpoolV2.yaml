@@ -2,7 +2,7 @@ DATASET:
   NAME: vg_coco
   TYPE: gen 
 MODEL:
-  NAME: GraphPool 
+  NAME: SSGPool
   TARGET: SBERT
   BATCH_SIZE: 32
   LR: 0.0001
@@ -14,9 +14,9 @@ MODEL:
   TAIL_RANGE: 100
   SAMPLE_MODE: tail_random 
   MODE: adj 
-  ALGO: SSGPoolV2
+  ALGO: DiffPool
   LAMBDA_REG: 0.05
-  SPEC_LOSS: True
+  SPEC_LOSS: False
   ENTR_LOSS: False 
   LINK_LOSS: False 
   NUM_POOLED: 100

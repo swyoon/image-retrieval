@@ -275,12 +275,12 @@ def dense_ssgpool_gumbel(x, adj, s, Lapl, Lapl_soft, mask=None, is_training=Fals
         -1) + EPS)  # Pseudo-inverse of P (easy inversion theorem, in this case, sum is same with 2-norm)
     #s_inv_T = P_inv.transpose(1, 2)
 
-    #x_next = torch.bmm(s_inv, x)
+    x_next = torch.bmm(s_inv, x)
     #x_next = torch.bmm(s.transpose(1, 2), x)
     #x_next = torch.bmm(s_inv, x)
-    s_soft = s_soft / (s_soft.sum(1, keepdim=True) + 1e-10)
+    ###s_soft = s_soft###### / (s_soft.sum(1, keepdim=True) + 1e-10)
     #s_soft = s_soft / ((s_soft*s_soft).sum(1, keepdim=True) + 1e-10)
-    x_next = torch.bmm(s_soft.transpose(1, 2), x)
+    ###x_next = torch.bmm(s_soft.transpose(1, 2), x)
 
     #identity = torch.eye(num_nodes).unsqueeze(0).expand(batch_size, num_nodes, num_nodes).cuda()
     #link_loss = (adj + identity) - torch.matmul(s, s.transpose(1, 2))

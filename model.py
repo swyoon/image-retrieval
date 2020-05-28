@@ -591,9 +591,25 @@ class GraphPool(nn.Module):
             self.loss = TripletLoss(self.margin)
 
         if self.algo in ('DiffPool',):
-            self.gnn_embed = GNN_Block(self.word_emb_size, self.n_hidden, self.n_hidden) #DenseGCNConv(word_dim, embed_size)#
-            self.gnn_pool = GNN_Block(self.word_emb_size, self.n_hidden, self.n_pooled_node) #DenseGCNConv(embed_size, 20)#
-            self.gnn_embed2 = GNN_Block(self.n_hidden, self.n_hidden, self.n_hidden) #DenseGCNConv(embed_size, embed_size)
+            num_layers = cfg['MODEL']['N_LAYERS']
+            pool_ratio = cfg['MODEL']['POOL_RATIO']
+            max_num_nodes = 300
+            num_nodes = ceil(pool_ratio * max_num_nodes)
+            self.embed_block1 = GNN_Block(self.word_emb_size, self.n_hidden,
+                                          self.n_hidden)  # DenseGCNConv(word_dim, embed_size) #
+            self.pool_block1 = GNN_Block(self.word_emb_size, self.n_hidden,
+                                         num_nodes)  # DenseGCNConv(embed_size, num_nodes) #
+            self.embed_blocks = torch.nn.ModuleList()
+            self.pool_blocks = torch.nn.ModuleList()
+            for i in range(num_layers - 1):
+                num_nodes = ceil(pool_ratio * num_nodes)
+                self.embed_blocks.append(GNN_Block(self.n_hidden, self.n_hidden, self.n_hidden))
+                self.pool_blocks.append(GNN_Block(self.n_hidden, self.n_hidden, num_nodes))
+
+            self.embed_final = GNN_Block(self.n_hidden, self.n_hidden,
+                                         self.n_hidden)  # DenseGCNConv(embed_size, embed_size) #
+            self.linear_f = nn.Linear(self.n_hidden * (num_layers + 1), self.n_hidden)
+
         elif self.algo == 'SSGPool':
             self.gnn_embed = GNN_Block(self.word_emb_size, self.n_hidden, self.n_hidden) #DenseGCNConv(word_dim, embed_size) # #
             self.gnn_pool = GNN_Block(self.word_emb_size, self.n_hidden, self.n_pooled_node) #DenseGCNConv(embed_size, 20) # #
@@ -628,20 +644,38 @@ class GraphPool(nn.Module):
         adj = graph['adj']
         lengths = graph['n_node'].flatten()
         if self.algo == 'DiffPool':
+
             spec_losses = 0.
             entr_losses = 0.
             link_losses = 0.
             mask = torch.arange(max(lengths)).expand(len(lengths), max(lengths)).cuda() < lengths.unsqueeze(1)
             mask = mask.to(torch.float)
+            x = self.embed(x)
 
-            x_next = F.relu(self.gnn_embed(x, adj, mask))
-            s = self.gnn_pool(x, adj, mask)
-            x, adj, link_loss, entr_loss, spec_loss = dense_diff_pool(x_next, adj, s, mask)
-            spec_losses += spec_loss
-            entr_losses += entr_loss
+            s = self.pool_block1(x, adj, mask, add_loop=True)
+            x = F.relu(self.embed_block1(x, adj, mask, add_loop=True))
+            xs = [torch.sum(x, 1) / (mask.sum(-1, keepdims=True).to(x.dtype) + 1e-10)]
+            x, adj, link_loss, ent_loss = dense_diff_pool(x, adj, s, mask)
             link_losses += link_loss
-            features = self.gnn_embed2(x, adj)
-            feature_out = features.mean(dim=1)
+            entr_losses += ent_loss
+            for i, (embed_block, pool_block) in enumerate(
+                    zip(self.embed_blocks, self.pool_blocks)):
+                s = pool_block(x, adj)
+                x = F.relu(embed_block(x, adj))
+                xs.append(x.mean(dim=1))
+                if i < len(self.embed_blocks):
+                    x, adj, link_loss, ent_loss = dense_diff_pool(x, adj, s)
+                    link_losses += link_loss
+                    entr_losses += ent_loss
+
+            spec_losses += torch.Tensor([0.])
+            # features = F.dropout(features, 0.5)
+            x = self.embed_final(x, adj)
+
+            xs.append(torch.mean(x, 1))
+
+            feature_out = self.linear_f(torch.cat(xs, -1))
+
             feature_out = l2norm(feature_out)
             return feature_out, (spec_losses, entr_losses, link_losses)
         elif self.algo == 'SSGPool':
@@ -699,6 +733,8 @@ class GraphPool(nn.Module):
             # x = self.embed(x)
             s = self.pool_block1(x, adj, mask, add_loop=True)
             x = F.relu(self.embed_block1(x, adj, mask, add_loop=True))
+            ##xs = [torch.sum(x, 1) / (mask.sum(-1, keepdims=True).to(x.dtype) + 1e-10)]
+
             diag_ele = torch.sum(adj, -1)
             Diag = torch.diag_embed(diag_ele)
             Lapl = Diag - adj
@@ -713,6 +749,7 @@ class GraphPool(nn.Module):
                     zip(self.embed_blocks, self.pool_blocks)):
                 s = pool_block(x, adj, add_loop=True)
                 x = F.relu(embed_block(x, adj, add_loop=True))
+                ##xs.append(x.mean(dim=1))
                 if i < len(self.embed_blocks):
                     x, adj, L_next, L_next_soft, s, s_inv, s_inv_soft = dense_ssgpool_gumbel(x, adj, s, L_next, L_next_soft, is_training=self.training)
                     s_final = torch.bmm(s_final, s)
@@ -720,8 +757,10 @@ class GraphPool(nn.Module):
                     s_inv_soft_final = torch.bmm(s_inv_soft, s_inv_soft_final)
 
             x = self.embed_final(x, adj, add_loop=True)
+            ##xs.append(x.mean(dim=1))
 
             feature_out = x.mean(dim=1)
+            ##feature_out = self.linear_f(torch.cat(xs, -1))
 
             spec_loss, spec_loss_hard = get_Spectral_loss(Lapl_ori, L_next, s_inv_final.transpose(1,2), L_next_soft, s_inv_soft_final.transpose(1, 2), 1, mask)
 
@@ -773,15 +812,15 @@ class GraphPool(nn.Module):
 
         for i, (reg1, reg2) in enumerate(zip(reg_loss1, reg_loss2)):
             if i == 0:
+                specloss = (reg1 + reg2).mean()
                 if self.use_specloss:
-                    specloss = (reg1 + reg2).mean()
                     loss += self.lambda_reg * specloss
             if i == 1:
+                entrloss = (reg1 + reg2).mean()
                 if self.use_entrloss:
-                    entrloss = (reg1 + reg2).mean()
                     loss += self.lambda_reg * entrloss
             if i == 2:
+                linkloss = (reg1 + reg2).mean()
                 if self.use_linkloss:
-                    linkloss = (reg1 + reg2).mean()
                     loss += self.lambda_reg * linkloss
         return {'loss': loss, 'specloss': specloss, 'entrloss': entrloss, 'linkloss': linkloss}

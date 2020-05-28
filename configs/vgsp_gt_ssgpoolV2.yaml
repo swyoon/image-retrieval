@@ -15,7 +15,7 @@ MODEL:
   SAMPLE_MODE: tail_random 
   MODE: adj 
   ALGO: SSGPoolV2
-  LAMBDA_REG: 0.05
+  LAMBDA_REG: 0.1
   SPEC_LOSS: True
   ENTR_LOSS: False 
   LINK_LOSS: False 
