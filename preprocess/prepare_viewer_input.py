@@ -50,6 +50,10 @@ elif DATASET == 'vg_coco':
     vg = VGDataset()
     l_test = vg.d_split[DB_SET]
     resnet_feature_file = '/data/project/rw/CBIR/data/vg_coco/resnet152.h5'
+elif DATASET == 'vg_coco_sp':
+    vg = VGDataset(new_split=True)
+    l_test = vg.d_split[DB_SET]
+    resnet_feature_file = '/data/project/rw/CBIR/data/vg_coco/resnet152.h5'
 
 f = h5py.File(resnet_feature_file, 'r')
 id2idx = {img_id: int(idx) for idx, img_id in enumerate(f['id'])}

@@ -83,11 +83,13 @@ def inference(dataset_name, model, infer_dset, args):
 
     if args.json and dataset_name == 'vg_coco':
         selected_id_file = 'test_id_1000_v3.json'
+        print(f'using {selected_id_file}')
         with open(selected_id_file, 'r') as f:
             vids = json.load(f)
             vids = list(map(int, vids))
     else:
         vids = infer_dset.ds.d_split['test']  # test set image id
+        print(f'# of test ids: {len(vids)}')
     infer_dset.sims = None
 
     if args.n_split is not None:
@@ -246,6 +248,27 @@ def main():
         else:
             ds = VGDataset(vocab_emb=vocab_emb_path, vocab2idx=vocab2idx_path, idx2vocab=idx2vocab_path,
                            sg_path=sg_path, new_split=False)
+    elif dataset_name == 'vg_coco_sp':
+        if model_cfg['DATASET']['TYPE'] == 'GTconn':  # connected GT graph
+            sim_mat_file = '/data/project/rw/CBIR/data/vg_coco/vg_coco_sbert_mean.npy'
+            sim_id_file = '/data/project/rw/CBIR/data/vg_coco/vg_coco_sbert_img_id.npy'
+
+            sg_path = '/data/project/rw/txt-img-retrieval/data/coco_sgalign/sg_align/vgcoco_sgg_newgt_connected_all_revised_with_adj.pkl'
+            vocab_emb_path = '/data/project/rw/txt-img-retrieval/data/coco_sgalign/glove/glove_embs_vgcoco_sgg_newgt_connected_all_revised.pkl'
+            vocab2idx_path = '/data/project/rw/txt-img-retrieval/data/coco_sgalign/glove/vocab2idx_vgcoco_sgg_newgt_connected_all_revised.pkl'
+            idx2vocab_path = '/data/project/rw/txt-img-retrieval/data/coco_sgalign/glove/idx2vocab_vgcoco_sgg_newgt_connected_all_revised.pkl'
+
+            print(f'scene graph file: {sg_path}')
+            print(f'vocab embedding: {vocab_emb_path}')
+            print(f'vocab2idx : {vocab2idx_path}')
+            print(f'idx2vocab : {idx2vocab_path}')
+
+            sims = BERTSimilarity(sim_mat_file, sim_id_file)
+            ds = VGDataset(vocab_emb=vocab_emb_path, vocab2idx=vocab2idx_path, idx2vocab=idx2vocab_path,
+                           sg_path=sg_path, new_split=True)
+        else:
+            raise ValueError
+
     print("loaded label data {}s".format(time.time()-tic))
 
     # ------------ Construct Dataset Class ------------------------------------
@@ -262,7 +285,7 @@ def main():
                                     bbox_size=mcfg.get('bbox_size', 64),
                                     pos_k=mcfg.get('POS_K', None))
     else:
-        if dataset_name == 'vg_coco':
+        if dataset_name == 'vg_coco' or dataset_name == 'vg_coco_sp':
             val_split = 'test'
         else:
             val_split = 'val'

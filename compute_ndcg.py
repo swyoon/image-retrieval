@@ -135,7 +135,7 @@ if __name__ == '__main__':
     #
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('dataset', type=str, help='dataset name', choices=('vg_coco', 'coco', 'f30k'))
+    parser.add_argument('dataset', type=str, help='dataset name', choices=('vg_coco', 'coco', 'f30k', 'vg_coco_sp'))
     parser.add_argument('model_name', type=str, help='The name of directory to be searched for predicted similarity score')
     parser.add_argument('--resultdir', type=str, default='/data/project/rw/viewer_CBIR/viewer/results/')
     parser.add_argument('--json', action='store_true', help='use separate json file to load query image ids. only valid for vg_coco dataset')
@@ -172,6 +172,14 @@ if __name__ == '__main__':
             l_query_id = ds.d_split['test']
         bert_sim_file = '/data/project/rw/CBIR/data/vg_coco/vg_coco_sbert_mean.npy'
         bert_id_file = '/data/project/rw/CBIR/data/vg_coco/vg_coco_sbert_img_id.npy'
+    elif args.dataset == 'vg_coco_sp':
+        ds = VGDataset(new_split=True)
+        l_query_id = ds.d_split['test']
+        bert_sim_file = '/data/project/rw/CBIR/data/vg_coco/vg_coco_sbert_mean.npy'
+        bert_id_file = '/data/project/rw/CBIR/data/vg_coco/vg_coco_sbert_img_id.npy'
+    else:
+        raise NotImplementedError
+
     print(f'running for {len(l_query_id)} queries')
 
     # if args.query == 'all':
