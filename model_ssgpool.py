@@ -13,7 +13,7 @@ from collections import OrderedDict
 from torch.nn import Linear, Sequential, ReLU, BatchNorm1d as BN
 from torch_geometric.nn import  DenseSAGEConv, DenseGINConv, GCNConv, global_mean_pool
 from torch_geometric.utils import dense_to_sparse
-from model_graph_ssgpool import DenseGCNConv, dense_diff_pool, get_Spectral_loss, dense_ssgpool, dense_ssgpool_gumbel, SAGPooling, dense_ssgpool_gumbel_select
+from model_graph_ssgpool import DenseGCNConv, dense_diff_pool, get_Spectral_loss, dense_ssgpool, dense_ssgpool_gumbel, SAGPooling
 #from torch_geometric.nn import GCNConv
 
 from sentence_transformers import SentenceTransformer

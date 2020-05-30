@@ -7,7 +7,7 @@ import numpy as np
 from torchvision.models import resnet18
 import torch_geometric.nn as gnn
 from model_ssgpool import l2norm, GNN_Block
-from model_graph_ssgpool import dense_diff_pool, get_Spectral_loss, dense_ssgpool, dense_ssgpool_gumbel
+from model_graph_ssgpool import dense_diff_pool, get_Spectral_loss, dense_ssgpool, dense_ssgpool_gumbel, get_spectral_loss_mini
 
 class TripletLoss(nn.Module):
     """
@@ -591,7 +591,7 @@ class GraphPool(nn.Module):
             self.loss = TripletLoss(self.margin)
 
         if self.algo in ('DiffPool',):
-            num_layers = cfg['MODEL']['N_LAYERS']
+            self.num_layers = cfg['MODEL']['N_LAYERS']
             pool_ratio = cfg['MODEL']['POOL_RATIO']
             max_num_nodes = 300
             num_nodes = ceil(pool_ratio * max_num_nodes)
@@ -601,21 +601,21 @@ class GraphPool(nn.Module):
                                          num_nodes)  # DenseGCNConv(embed_size, num_nodes) #
             self.embed_blocks = torch.nn.ModuleList()
             self.pool_blocks = torch.nn.ModuleList()
-            for i in range(num_layers - 1):
+            for i in range(self.num_layers - 1):
                 num_nodes = ceil(pool_ratio * num_nodes)
                 self.embed_blocks.append(GNN_Block(self.n_hidden, self.n_hidden, self.n_hidden))
                 self.pool_blocks.append(GNN_Block(self.n_hidden, self.n_hidden, num_nodes))
 
             self.embed_final = GNN_Block(self.n_hidden, self.n_hidden,
                                          self.n_hidden)  # DenseGCNConv(embed_size, embed_size) #
-            self.linear_f = nn.Linear(self.n_hidden * (num_layers + 1), self.n_hidden)
+            self.linear_f = nn.Linear(self.n_hidden * (self.num_layers + 1), self.n_hidden)
 
         elif self.algo == 'SSGPool':
             self.gnn_embed = GNN_Block(self.word_emb_size, self.n_hidden, self.n_hidden) #DenseGCNConv(word_dim, embed_size) # #
             self.gnn_pool = GNN_Block(self.word_emb_size, self.n_hidden, self.n_pooled_node) #DenseGCNConv(embed_size, 20) # #
             self.gnn_embed_f = GNN_Block(self.n_hidden, self.n_hidden, self.n_hidden)#DenseGCNConv(embed_size, embed_size)#
         elif self.algo == 'SSGPoolV2':
-            num_layers = cfg['MODEL']['N_LAYERS']
+            self.num_layers = cfg['MODEL']['N_LAYERS']
             pool_ratio = cfg['MODEL']['POOL_RATIO']
             max_num_nodes = 300
             num_nodes = ceil(pool_ratio * max_num_nodes)
@@ -623,13 +623,13 @@ class GraphPool(nn.Module):
             self.pool_block1 = GNN_Block(self.word_emb_size, self.n_hidden, num_nodes) #DenseGCNConv(embed_size, num_nodes) #
             self.embed_blocks = torch.nn.ModuleList()
             self.pool_blocks = torch.nn.ModuleList()
-            for i in range(num_layers - 1):
+            for i in range(self.num_layers - 1):
                 num_nodes = ceil(pool_ratio * num_nodes)
                 self.embed_blocks.append(GNN_Block(self.n_hidden, self.n_hidden, self.n_hidden))
                 self.pool_blocks.append(GNN_Block(self.n_hidden, self.n_hidden, num_nodes))
 
             self.embed_final = GNN_Block(self.n_hidden, self.n_hidden, self.n_hidden) #DenseGCNConv(embed_size, embed_size) #
-            self.linear_f = nn.Linear(self.n_hidden * (num_layers + 1) , self.n_hidden)
+            self.linear_f = nn.Linear(self.n_hidden * (self.num_layers + 1) , self.n_hidden)
 
         else:
             raise ValueError
@@ -650,7 +650,7 @@ class GraphPool(nn.Module):
             link_losses = 0.
             mask = torch.arange(max(lengths)).expand(len(lengths), max(lengths)).cuda() < lengths.unsqueeze(1)
             mask = mask.to(torch.float)
-            x = self.embed(x)
+            #x = self.embed(x)
 
             s = self.pool_block1(x, adj, mask, add_loop=True)
             x = F.relu(self.embed_block1(x, adj, mask, add_loop=True))
@@ -722,6 +722,7 @@ class GraphPool(nn.Module):
             spec_losses_hard = 0.
             entr_losses = 0.
             coarsen_losses = 0.
+
             mask = torch.arange(max(lengths)).expand(len(lengths), max(lengths)).cuda() < lengths.unsqueeze(1)
             mask = mask.to(torch.float)
             B, N, _ = adj.size()
@@ -733,13 +734,18 @@ class GraphPool(nn.Module):
             # x = self.embed(x)
             s = self.pool_block1(x, adj, mask, add_loop=True)
             x = F.relu(self.embed_block1(x, adj, mask, add_loop=True))
-            ##xs = [torch.sum(x, 1) / (mask.sum(-1, keepdims=True).to(x.dtype) + 1e-10)]
+            xs = [torch.sum(x, 1) / (mask.sum(-1, keepdims=True).to(x.dtype) + 1e-10)]
 
             diag_ele = torch.sum(adj, -1)
             Diag = torch.diag_embed(diag_ele)
             Lapl = Diag - adj
             Lapl_ori = Lapl
-            x, adj, L_next, L_next_soft, s, s_inv, s_inv_soft = dense_ssgpool_gumbel(x, adj, s, Lapl, Lapl, mask, is_training=self.training)
+            x_before = x
+            L_before = Lapl
+            x, adj, L_next, L_next_soft, s, s_soft, s_inv, s_inv_soft = dense_ssgpool_gumbel(x, adj, s, Lapl, Lapl, mask, is_training=self.training)
+            spec_loss, spec_loss_soft = get_spectral_loss_mini(x_before, s, s_inv, s_soft, s_inv_soft, L_before, mask)
+            spec_losses +=spec_loss_soft
+            spec_losses_hard += spec_loss
 
             s_final = torch.bmm(s_final, s)
             s_inv_final = torch.bmm(s_inv, s_inv_final)
@@ -749,21 +755,30 @@ class GraphPool(nn.Module):
                     zip(self.embed_blocks, self.pool_blocks)):
                 s = pool_block(x, adj, add_loop=True)
                 x = F.relu(embed_block(x, adj, add_loop=True))
-                ##xs.append(x.mean(dim=1))
+                xs.append(x.mean(dim=1))
                 if i < len(self.embed_blocks):
-                    x, adj, L_next, L_next_soft, s, s_inv, s_inv_soft = dense_ssgpool_gumbel(x, adj, s, L_next, L_next_soft, is_training=self.training)
+                    x_before = x
+                    L_before = L_next
+                    x, adj, L_next, L_next_soft, s, s_soft, s_inv, s_inv_soft = dense_ssgpool_gumbel(x, adj, s, L_next, L_next_soft, is_training=self.training)
+                    spec_loss, spec_loss_soft = get_spectral_loss_mini(x_before, s, s_inv, s_soft, s_inv_soft, L_before, mask)
+                    spec_losses += spec_loss_soft
+                    spec_losses_hard += spec_loss
                     s_final = torch.bmm(s_final, s)
                     s_inv_final = torch.bmm(s_inv, s_inv_final)
                     s_inv_soft_final = torch.bmm(s_inv_soft, s_inv_soft_final)
 
             x = self.embed_final(x, adj, add_loop=True)
-            ##xs.append(x.mean(dim=1))
+            xs.append(x.mean(dim=1))
 
-            feature_out = x.mean(dim=1)
-            ##feature_out = self.linear_f(torch.cat(xs, -1))
-
-            spec_loss, spec_loss_hard = get_Spectral_loss(Lapl_ori, L_next, s_inv_final.transpose(1,2), L_next_soft, s_inv_soft_final.transpose(1, 2), 1, mask)
-
+            #feature_out = x.mean(dim=1)
+            feature_out = self.linear_f(torch.cat(xs, -1))
+            #if feature_out.requires_grad ==True:
+            #    #spec_loss, spec_loss_hard = get_Spectral_loss(Lapl_ori, L_next, s_inv_final.transpose(1,2), L_next_soft, s_inv_soft_final.transpose(1, 2), 1, mask)
+            #    spec_loss = torch.Tensor([0.])
+            #   spec_loss_hard = torch.Tensor([0.])
+            #else:
+            #    spec_loss = torch.Tensor([0.])
+            #    spec_loss_hard = torch.Tensor([0.])
             coarsen_loss = ori_adj - torch.matmul(s_final, s_final.transpose(1,2))
             mask_ = mask.view(B, N, 1).to(x.dtype)
             coarsen_loss = coarsen_loss * mask_
@@ -771,8 +786,10 @@ class GraphPool(nn.Module):
             coarsen_loss = torch.sqrt((coarsen_loss * coarsen_loss).sum(dim=(1, 2)))
 
 
-            spec_losses += spec_loss.mean()
-            spec_losses_hard += spec_loss_hard.mean()
+            spec_losses = (spec_losses/self.num_layers).mean()
+            spec_losses_hard = (spec_losses_hard/self.num_layers).mean()
+            #spec_losses += spec_loss
+            #spec_losses_hard += spec_loss_hard
             entr_losses += torch.Tensor([0.]) #entr_loss.mean()
             coarsen_losses += coarsen_loss.mean()
 
