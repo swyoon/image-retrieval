@@ -504,6 +504,20 @@ def concat_data(l_x):
                 for i, x in enumerate(l_data):
                     A[i, :x.shape[0], :x.shape[1]] = x
                 out[key] = A
+        # node flat
+        out['nodes_flat'] = torch.cat([x['x'] for x in l_x])
+
+        # adj flat & batch
+        l_adj = [x['adj'] for x in l_x]
+        n_total_nodes = sum([len(adj) for adj in l_adj])
+        adj_flat = torch.zeros(n_total_nodes, n_total_nodes)
+        start = 0
+        for adj in l_adj:
+            end = len(adj)
+            adj_flat[start:start + end, start:start + end]  = adj
+            start += end
+        out['adj_flat'] = adj_flat
+        out['batch'] = torch.cat([torch.ones(len(adj)) * i for i, adj in enumerate(l_adj)]).long()
         return out
     elif isinstance(l_x[0], tuple):
         return [ concat_data([x[i] for x in l_x]) for i in range(len(l_x[0]))]
@@ -516,10 +530,11 @@ def repeat_data(x, n_repeat):
     if isinstance(x, torch.Tensor):
         return torch.stack([x] * n_repeat)
     elif isinstance(x, dict):
-        out = {}
-        for key in x.keys():
-            out[key] = torch.stack([x[key]] * n_repeat)
-        return out
+        return concat_data([x for i in range(n_repeat)])
+        #out = {}
+        # for key in x.keys():
+        #     out[key] = torch.stack([x[key]] * n_repeat)
+        # return out
 
 
 class Dset_VG_Pairwise(Dataset):

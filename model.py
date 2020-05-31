@@ -6,8 +6,12 @@ import torchvision
 import numpy as np
 from torchvision.models import resnet18
 import torch_geometric.nn as gnn
-from model_ssgpool import l2norm, GNN_Block
-from model_graph_ssgpool import dense_diff_pool, get_Spectral_loss, dense_ssgpool, dense_ssgpool_gumbel, get_spectral_loss_mini
+from model_ssgpool import l2norm, GNN_Block, GNN_Block_sparse
+from model_graph_ssgpool import dense_diff_pool, get_Spectral_loss, dense_ssgpool, dense_ssgpool_gumbel, \
+    get_spectral_loss_mini, SAGPooling
+from torch_geometric.utils import dense_to_sparse
+from torch_geometric.nn import global_mean_pool
+
 
 class TripletLoss(nn.Module):
     """
@@ -630,6 +634,11 @@ class GraphPool(nn.Module):
 
             self.embed_final = GNN_Block(self.n_hidden, self.n_hidden, self.n_hidden) #DenseGCNConv(embed_size, embed_size) #
             self.linear_f = nn.Linear(self.n_hidden * (self.num_layers + 1) , self.n_hidden)
+        elif self.algo == 'SAGPool':
+            self.gnn_embed = GNN_Block_sparse(self.word_emb_size, self.n_hidden, self.n_hidden) #GCNConv(word_dim, embed_size) #
+            self.gnn_pool = SAGPooling(self.n_hidden, 0.2)
+            self.gnn_embed_f = GNN_Block_sparse(self.n_hidden, self.n_hidden, self.n_hidden) #GCNConv(embed_size, embed_size) #
+            self.linear_f = nn.Linear(self.n_hidden * 2 , self.n_hidden)
 
         else:
             raise ValueError
@@ -796,6 +805,26 @@ class GraphPool(nn.Module):
             feature_out = l2norm(feature_out)
 
             return feature_out, (spec_losses, spec_losses_hard, coarsen_losses)
+        elif self.algo == 'SAGPool':
+            x = graph['nodes_flat']
+            adj = graph['adj_flat']
+            batch = graph['batch']
+            adj = ((adj + adj.transpose(0, 1)) > 0.).float()
+            edge_index, _ = dense_to_sparse(adj)
+
+            # x = self.embed(x)
+            x = F.relu(self.gnn_embed(x, edge_index))
+            xs = [global_mean_pool(x, batch)]
+            x, edge_index, _, batch, _, _ = self.gnn_pool(x, edge_index, batch=batch)
+            x = self.gnn_embed_f(x, edge_index)
+
+            xs.append(global_mean_pool(x, batch))
+            feature_out = self.linear_f(torch.cat(xs, -1))
+
+            spec_losses = torch.Tensor([0.])
+            entr_losses = torch.Tensor([0.])
+            coarsen_losses = torch.Tensor([0.])
+            return feature_out, (spec_losses, entr_losses, coarsen_losses)
 
     def score(self, data1, data2, **kwargs):
         emb1, reg_loss1 = self._embed(data1)
