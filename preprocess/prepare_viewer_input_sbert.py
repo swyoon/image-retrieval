@@ -18,7 +18,7 @@ from data import BERTSimilarity, get_karpathy_split_light, FlickrDataset, VGData
 
 
 DATASET = 'vg_coco_sp'  # one of ('coco', 'f30k')
-GENCAP = True
+GENCAP = False 
 print('Preparing similarity scores for CBIR web viewer...')
 
 if DATASET == 'coco':

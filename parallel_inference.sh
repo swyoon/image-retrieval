@@ -1,9 +1,9 @@
 #! /bin/bash
-YAML_NAME=vgsp_gt_ssgpoolV2.yaml
-EXP_NAME=vgsp_gt_ssgpoolV2
-NAME=vgsp-ssgpoolV2-
+YAML_NAME=vgsp_gt_gcn.yaml
+EXP_NAME=vgsp_gt_gcn
+NAME=vgsp-gcn-
 N_SPLIT=5
-EPOCH=24
+EPOCH=19
 
 for ((split_idx=0; split_idx<N_SPLIT; split_idx++))
 do
