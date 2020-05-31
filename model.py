@@ -636,7 +636,8 @@ class GraphPool(nn.Module):
             self.linear_f = nn.Linear(self.n_hidden * (self.num_layers + 1) , self.n_hidden)
         elif self.algo == 'SAGPool':
             self.gnn_embed = GNN_Block_sparse(self.word_emb_size, self.n_hidden, self.n_hidden) #GCNConv(word_dim, embed_size) #
-            self.gnn_pool = SAGPooling(self.n_hidden, 0.2)
+            pool_ratio = cfg['MODEL']['POOL_RATIO']
+            self.gnn_pool = SAGPooling(self.n_hidden, pool_ratio)
             self.gnn_embed_f = GNN_Block_sparse(self.n_hidden, self.n_hidden, self.n_hidden) #GCNConv(embed_size, embed_size) #
             self.linear_f = nn.Linear(self.n_hidden * 2 , self.n_hidden)
 

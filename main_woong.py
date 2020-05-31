@@ -106,24 +106,40 @@ def inference(dataset_name, model, infer_dset, args):
         target = concat_data(l_imgs)
         target = to_cuda(target)
 
-        # get test image
-        query = infer_dset.get_by_id(vid)
-        query = repeat_data(query, len(l_imgs))
-        query = to_cuda(query)
+        if args.infer_batch:
+            query = infer_dset.get_by_id(vid)
+            query = repeat_data(query, 10)
+            query = to_cuda(query)
 
-        # l_score = []
-        # for batch in dl:
-        #     batch = batch.cuda()
-        #     with torch.no_grad():
-        #         score = model(query, batch)
-        #         l_score += score.flatten().detach().cpu().tolist()
-        # score = l_score
+            l_score = []
+            for i_batch in range(10):  # hard coded for 100 reranking
+                target = concat_data(l_imgs[i_batch * 10:(i_batch+1) * 10])
+                target = to_cuda(target)
 
-        # run prediction
-        # time_s = time.time()
-        with torch.no_grad():
-            score, _ = model.score(query, target)
-            score = score.detach().cpu().flatten().tolist()
+                with torch.no_grad():
+                    score, _ = model.score(query, target)
+                    score = score.detach().cpu().flatten().tolist()
+                    l_score += score
+            score = l_score
+        else:
+            # get test image
+            query = infer_dset.get_by_id(vid)
+            query = repeat_data(query, len(l_imgs))
+            query = to_cuda(query)
+
+            # l_score = []
+            # for batch in dl:
+            #     batch = batch.cuda()
+            #     with torch.no_grad():
+            #         score = model(query, batch)
+            #         l_score += score.flatten().detach().cpu().tolist()
+            # score = l_score
+
+            # run prediction
+            # time_s = time.time()
+            with torch.no_grad():
+                score, _ = model.score(query, target)
+                score = score.detach().cpu().flatten().tolist()
         infer_result = {'img_id': l_reranked, 'sim': score}
         # print(f'model: {time.time() - time_s} sec')
 
