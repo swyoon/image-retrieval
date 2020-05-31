@@ -135,7 +135,7 @@ if __name__ == '__main__':
     #
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('dataset', type=str, help='dataset name', choices=('vg_coco', 'coco', 'f30k', 'vg_coco_sp'))
+    parser.add_argument('dataset', type=str,  help='dataset name', choices=('vg_coco', 'coco', 'f30k', 'vg_coco_sp'))
     parser.add_argument('model_name', type=str, help='The name of directory to be searched for predicted similarity score')
     parser.add_argument('--resultdir', type=str, default='/data/project/rw/viewer_CBIR/viewer/results/')
     parser.add_argument('--json', action='store_true', help='use separate json file to load query image ids. only valid for vg_coco dataset')

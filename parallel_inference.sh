@@ -1,3 +1,4 @@
+
 #! /bin/bash
 YAML_NAME=vgsp_gt_gcn.yaml
 EXP_NAME=vgsp_gt_gcn
@@ -13,4 +14,3 @@ do
         -n ${NAME}${split_idx} -t "braincloud-v2-kakaobrain-woong.ssang_kakaobrain.com-cb164000-191e-4bf5-bc1c-be68829568d3" -f p1.xlarge -w /data/project/rw/woong.ssang/CBIR/ -z private:normal\
         --http-proxy-on
 done
-

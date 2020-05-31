@@ -1,8 +1,8 @@
 DATASET:
-  NAME: vg_coco
-  TYPE: gen 
+  NAME: vg_coco_sp
+  TYPE: GTconn
 MODEL:
-  NAME: SSGPool
+  NAME: GraphPool
   TARGET: SBERT
   BATCH_SIZE: 32
   LR: 0.0001
@@ -12,13 +12,13 @@ MODEL:
   NUM_HIDDEN: 256
   NUM_HEAD: 8
   TAIL_RANGE: 100
-  SAMPLE_MODE: tail_random 
-  MODE: adj 
+  SAMPLE_MODE: tail_random
+  MODE: adj
   ALGO: DiffPool
-  LAMBDA_REG: 0.05
+  LAMBDA_REG: 0.1
   SPEC_LOSS: False
-  ENTR_LOSS: False 
-  LINK_LOSS: False 
+  ENTR_LOSS: False
+  LINK_LOSS: False
   NUM_POOLED: 100
   N_LAYERS: 1
   POOL_RATIO: 0.2

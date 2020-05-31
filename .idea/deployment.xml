@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
-  <component name="PublishConfigData" autoUpload="Always" serverName="Copy of project-level server 'grcnn'">
+  <component name="PublishConfigData" autoUpload="Always" serverName="kwon_CBIR">
     <serverData>
-      <paths name="Copy of project-level server 'grcnn'">
+      <paths name="kwon_CBIR">
         <serverdata>
           <mappings>
-            <mapping deploy="/root/CBIR" local="$PROJECT_DIR$" />
+            <mapping deploy="/data/project/rw/kloud/CBIR-newsplit" local="$PROJECT_DIR$" />
           </mappings>
         </serverdata>
       </paths>

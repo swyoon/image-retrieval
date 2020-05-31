@@ -249,6 +249,7 @@ def main():
             ds = VGDataset(vocab_emb=vocab_emb_path, vocab2idx=vocab2idx_path, idx2vocab=idx2vocab_path,
                            sg_path=sg_path, new_split=False)
     elif dataset_name == 'vg_coco_sp':
+
         if model_cfg['DATASET']['TYPE'] == 'GTconn':  # connected GT graph
             sim_mat_file = '/data/project/rw/CBIR/data/vg_coco/vg_coco_sbert_mean.npy'
             sim_id_file = '/data/project/rw/CBIR/data/vg_coco/vg_coco_sbert_img_id.npy'

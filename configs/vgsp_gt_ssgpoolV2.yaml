@@ -16,9 +16,9 @@ MODEL:
   MODE: adj 
   ALGO: SSGPoolV2
   LAMBDA_REG: 0.05
-  SPEC_LOSS: True
+  SPEC_LOSS: False
   ENTR_LOSS: False 
   LINK_LOSS: False 
   NUM_POOLED: 100
   N_LAYERS: 1
-  POOL_RATIO: 0.2
+  POOL_RATIO: 0.1
