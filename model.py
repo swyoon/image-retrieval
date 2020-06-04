@@ -640,6 +640,21 @@ class GraphPool(nn.Module):
             self.gnn_pool = SAGPooling(self.n_hidden, pool_ratio)
             self.gnn_embed_f = GNN_Block_sparse(self.n_hidden, self.n_hidden, self.n_hidden) #GCNConv(embed_size, embed_size) #
             self.linear_f = nn.Linear(self.n_hidden * 2 , self.n_hidden)
+        elif self.algo == 'NoPool':
+            self.num_layers = cfg['MODEL']['N_LAYERS']
+            pool_ratio = cfg['MODEL']['POOL_RATIO']
+            max_num_nodes = 300
+            num_nodes = ceil(pool_ratio * max_num_nodes)
+            self.embed_block1 = GNN_Block(self.word_emb_size, self.n_hidden,
+                                          self.n_hidden)  # DenseGCNConv(word_dim, embed_size) #
+            self.embed_blocks = torch.nn.ModuleList()
+            for i in range(self.num_layers - 1):
+                num_nodes = ceil(pool_ratio * num_nodes)
+                self.embed_blocks.append(GNN_Block(self.n_hidden, self.n_hidden, self.n_hidden))
+
+            self.embed_final = GNN_Block(self.n_hidden, self.n_hidden,
+                                         self.n_hidden)  # DenseGCNConv(embed_size, embed_size) #
+            self.linear_f = nn.Linear(self.n_hidden * (self.num_layers + 1), self.n_hidden)
 
         else:
             raise ValueError
@@ -821,11 +836,32 @@ class GraphPool(nn.Module):
 
             xs.append(global_mean_pool(x, batch))
             feature_out = self.linear_f(torch.cat(xs, -1))
+            feature_out = l2norm(feature_out)
 
             spec_losses = torch.Tensor([0.])
             entr_losses = torch.Tensor([0.])
             coarsen_losses = torch.Tensor([0.])
             return feature_out, (spec_losses, entr_losses, coarsen_losses)
+        elif self.algo == 'NoPool':
+            mask = torch.arange(max(lengths)).expand(len(lengths), max(lengths)).cuda() < lengths.unsqueeze(1)
+            mask = mask.to(torch.float)
+
+            x = F.relu(self.embed_block1(x, adj, mask, add_loop=True))
+            xs = [torch.sum(x, 1) / (mask.sum(-1, keepdims=True).to(x.dtype) + 1e-10)]
+            x = self.embed_final(x, adj)
+
+            xs.append(torch.mean(x, 1))
+
+            feature_out = self.linear_f(torch.cat(xs, -1))
+
+            feature_out = l2norm(feature_out)
+
+            spec_losses = torch.Tensor([0.])
+            entr_losses = torch.Tensor([0.])
+            link_losses = torch.Tensor([0.])
+            coarsen_losses = torch.Tensor([0.])
+            return feature_out, (spec_losses, entr_losses, link_losses)
+
 
     def score(self, data1, data2, **kwargs):
         emb1, reg_loss1 = self._embed(data1)
